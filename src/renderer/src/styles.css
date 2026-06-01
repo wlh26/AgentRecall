@@ -1304,3 +1304,11 @@ select {
   background: var(--bg-elevated-2);
   color: var(--text);
 }
+
+/* ============================================================ OVERLAY SCROLL LOCK */
+/* While the detail overlay is open, freeze the background scrollers so the
+   wheel only ever moves the conversation inside the panel. */
+body.overlay-open .results,
+body.overlay-open .sidebar {
+  overflow: hidden;
+}

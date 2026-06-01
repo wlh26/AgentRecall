@@ -189,6 +189,11 @@ export function App(): ReactElement {
     document.querySelector(".session-row.selected")?.scrollIntoView({ block: "nearest" });
   }, [selectedKey]);
 
+  useEffect(() => {
+    document.body.classList.toggle("overlay-open", Boolean(detail));
+    return () => document.body.classList.remove("overlay-open");
+  }, [detail]);
+
   const selected = useMemo(
     () => results.find((session) => session.sessionKey === selectedKey) || null,
     [results, selectedKey],
