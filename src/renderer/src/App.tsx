@@ -181,6 +181,7 @@ export function App(): ReactElement {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [settingsFeedback, setSettingsFeedback] = useState<SettingsFeedback>(null);
+  const [pendingInternal, setPendingInternal] = useState<{ claude: boolean; codex: boolean }>({ claude: false, codex: false });
   const searchRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -319,7 +320,15 @@ export function App(): ReactElement {
     () => results.find((session) => session.sessionKey === selectedKey) || null,
     [results, selectedKey],
   );
-  const visibleSourceFilters = useMemo(() => sourceFilters(appSettings), [appSettings]);
+  const visibleSourceFilters = useMemo(() => {
+    if (!appSettings) return sourceFilters(null);
+    // Reveal an internal source filter only once its background load has finished.
+    return sourceFilters({
+      ...appSettings,
+      includeClaudeInternal: appSettings.includeClaudeInternal && !pendingInternal.claude,
+      includeCodexInternal: appSettings.includeCodexInternal && !pendingInternal.codex,
+    });
+  }, [appSettings, pendingInternal]);
   const selectedProject = useMemo(
     () => projects.find((project) => project.path === projectPath) || null,
     [projects, projectPath],
@@ -454,14 +463,40 @@ export function App(): ReactElement {
   }
 
   async function updateSettings(next: Partial<AppSettings>): Promise<void> {
+    const enablingClaude = next.includeClaudeInternal === true && !appSettings?.includeClaudeInternal;
+    const enablingCodex = next.includeCodexInternal === true && !appSettings?.includeCodexInternal;
     setSettingsFeedback({ kind: "running", message: "Saving settings..." });
     try {
-      const shouldRefreshIndex =
-        (next.includeClaudeInternal === true && !appSettings?.includeClaudeInternal) ||
-        (next.includeCodexInternal === true && !appSettings?.includeCodexInternal);
       const nextSettings = await window.sessionSearch.setSettings(next);
       setAppSettings(nextSettings);
-      if (shouldRefreshIndex) await window.sessionSearch.refreshIndex();
+
+      if (enablingClaude || enablingCodex) {
+        // Keep the toggle responsive: scan the internal source in the background
+        // and only reveal its sidebar filter once that scan finishes.
+        if (enablingClaude) setPendingInternal((current) => ({ ...current, claude: true }));
+        if (enablingCodex) setPendingInternal((current) => ({ ...current, codex: true }));
+        setSettingsFeedback({ kind: "success", message: "Loading sessions in the background…" });
+        void window.sessionSearch
+          .refreshIndex()
+          .then(async () => {
+            setPendingInternal((current) => ({
+              claude: enablingClaude ? false : current.claude,
+              codex: enablingCodex ? false : current.codex,
+            }));
+            await load();
+            setSettingsFeedback({ kind: "success", message: "Sources ready." });
+            window.setTimeout(() => {
+              setSettingsFeedback((current) => (current?.kind === "success" ? null : current));
+            }, 1600);
+          })
+          .catch((error) => {
+            if (enablingClaude) setPendingInternal((current) => ({ ...current, claude: false }));
+            if (enablingCodex) setPendingInternal((current) => ({ ...current, codex: false }));
+            setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+          });
+        return;
+      }
+
       await load();
       setSettingsFeedback({ kind: "success", message: "Settings saved." });
       window.setTimeout(() => {
