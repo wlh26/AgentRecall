@@ -236,6 +236,7 @@ export function App(): ReactElement {
 
   return (
     <main className="app" onClick={() => setContextMenu(null)}>
+      <div className="titlebar-drag" />
       <section className="sidebar">
         <div className="brand">
           <div className="brand-mark">
@@ -343,6 +344,7 @@ export function App(): ReactElement {
               placeholder={searchPlaceholder}
               autoFocus
             />
+            <span className="kbd-hint">⌘K</span>
           </div>
           {selectedProject ? (
             <button className="chip clear" onClick={() => setProjectPath(undefined)} title={selectedProject.path}>
