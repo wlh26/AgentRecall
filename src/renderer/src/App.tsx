@@ -131,6 +131,18 @@ export function App(): ReactElement {
     };
   }, [load]);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   const selected = useMemo(
     () => results.find((session) => session.sessionKey === selectedKey) || null,
     [results, selectedKey],
