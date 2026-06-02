@@ -33,7 +33,7 @@ import {
 import type { IndexStatus } from "../../core/indexer";
 import { formatMessageTime, formatRelativeTime } from "../../core/format-session";
 import type { AppSettings } from "../../core/platform";
-import { GLOBAL_SHORTCUT_OPTIONS } from "../../core/shortcuts";
+import { globalShortcutOptions } from "../../core/shortcuts";
 import type {
   LiveSessionSnapshot,
   ProjectSummary,
@@ -106,13 +106,25 @@ const STATS_PERIOD_OPTIONS: Array<{ label: string; value: SessionStatsPeriod }> 
   { label: "All", value: "allTime" },
 ];
 
-const DEFAULT_TERMINAL_OPTIONS: Array<{ label: string; value: AppSettings["defaultTerminal"] }> = [
-  { label: "Terminal", value: "Terminal" },
-  { label: "iTerm", value: "iTerm" },
-  { label: "Ghostty", value: "Ghostty" },
-  { label: "WezTerm", value: "WezTerm" },
-  { label: "Warp", value: "Warp" },
-];
+const RUNTIME_PLATFORM: NodeJS.Platform = window.sessionSearch.platform;
+
+const TERMINAL_LABELS: Record<AppSettings["defaultTerminal"], string> = {
+  Terminal: "Terminal",
+  iTerm: "iTerm",
+  Ghostty: "Ghostty",
+  WezTerm: "WezTerm",
+  Warp: "Warp",
+  WindowsTerminal: "Windows Terminal",
+  PowerShell: "PowerShell",
+  Cmd: "Command Prompt",
+};
+
+const MAC_TERMINAL_VALUES: Array<AppSettings["defaultTerminal"]> = ["Terminal", "iTerm", "Ghostty", "WezTerm", "Warp"];
+const WINDOWS_TERMINAL_VALUES: Array<AppSettings["defaultTerminal"]> = ["WindowsTerminal", "PowerShell", "Cmd"];
+
+const DEFAULT_TERMINAL_OPTIONS: Array<{ label: string; value: AppSettings["defaultTerminal"] }> = (
+  RUNTIME_PLATFORM === "win32" ? WINDOWS_TERMINAL_VALUES : MAC_TERMINAL_VALUES
+).map((value) => ({ label: TERMINAL_LABELS[value], value }));
 
 const LIVE_STATUS_FILTERS: Array<{ label: string; value: LiveStatusFilter }> = [
   { label: "All", value: "all" },
@@ -1519,8 +1531,8 @@ function SettingsDialog({
   onGlobalShortcutChange: (shortcut: AppSettings["globalShortcut"]) => void;
   onClose: () => void;
 }): ReactElement {
-  const defaultTerminal = settings?.defaultTerminal ?? "Terminal";
-  const globalShortcut = settings?.globalShortcut ?? "Alt+Space";
+  const defaultTerminal = settings?.defaultTerminal ?? (RUNTIME_PLATFORM === "win32" ? "WindowsTerminal" : "Terminal");
+  const globalShortcut = settings?.globalShortcut ?? (RUNTIME_PLATFORM === "win32" ? "Ctrl+Alt+Space" : "Alt+Space");
   const saving = feedback?.kind === "running";
   const [activeSection, setActiveSection] = useState<"terminal" | "shortcut" | "sources">("terminal");
 
@@ -1592,7 +1604,7 @@ function SettingsDialog({
                     disabled={!settings || saving}
                     onChange={(event) => onGlobalShortcutChange(event.target.value as AppSettings["globalShortcut"])}
                   >
-                    {GLOBAL_SHORTCUT_OPTIONS.map((option) => (
+                    {globalShortcutOptions(RUNTIME_PLATFORM).map((option) => (
                       <option key={option.label} value={option.value}>
                         {option.label}
                       </option>
