@@ -236,6 +236,59 @@ describe("SessionStore", () => {
     expect(stats.bySource.find((item) => item.source === "codex-app")?.totalTokens).toBe(0);
   });
 
+  it("dedupes token events after applying the selected stats range", () => {
+    const store = createInMemoryStore();
+    const now = new Date("2026-06-01T12:00:00Z").getTime();
+    const sharedKey = "codex:replayed-turn";
+    store.upsertIndexedSession(
+      sampleSession({ sessionKey: "codex:today", rawId: "today", source: "codex-cli" }),
+      messages,
+      [
+        {
+          dedupeKey: sharedKey,
+          timestamp: now - 60 * 60 * 1000,
+          inputTokens: 100,
+          outputTokens: 20,
+          cachedInputTokens: 0,
+          reasoningOutputTokens: 0,
+          totalTokens: 120,
+        },
+      ],
+    );
+    store.upsertIndexedSession(
+      sampleSession({ sessionKey: "codex:old", rawId: "old", source: "codex-app" }),
+      [
+        {
+          role: "user",
+          content: "old mirrored turn",
+          timestamp: new Date(now - 40 * 24 * 60 * 60 * 1000).toISOString(),
+          index: 0,
+        },
+      ],
+      [
+        {
+          dedupeKey: sharedKey,
+          timestamp: now - 40 * 24 * 60 * 60 * 1000,
+          inputTokens: 500,
+          outputTokens: 100,
+          cachedInputTokens: 0,
+          reasoningOutputTokens: 0,
+          totalTokens: 600,
+        },
+      ],
+    );
+
+    const today = store.getStats({ period: "today" }, now);
+
+    expect(today.total.totalTokens).toBe(120);
+    expect(today.bySource).toEqual([
+      expect.objectContaining({
+        source: "codex-cli",
+        totalTokens: 120,
+      }),
+    ]);
+  });
+
   it("keeps custom title, tags, favorite, pinned, and hidden state separate from reindexing", () => {
     const store = createInMemoryStore();
     store.upsertIndexedSession(sampleSession(), messages);

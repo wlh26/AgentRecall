@@ -11,11 +11,13 @@ It indexes existing local session files, lets you add your own titles and tags, 
 - Search Claude Code and Codex sessions from one desktop app.
 - Full-text search across custom titles, original titles, first user questions, conversation text, and project paths.
 - Add custom titles and tags without changing the upstream session files.
-- Filter by project, tag, source, pinned sessions, or hidden sessions.
+- Filter by project, tag, source, open/closed state, pinned sessions, or hidden sessions.
 - Resume a session in Terminal, iTerm, Ghostty, WezTerm, or Warp.
-- Copy resume commands or conversation exports.
+- Bring detected open terminals to front, copy resume commands, or export Markdown.
+- Track message and token usage for Today / 7D / 30D / All time.
 - Show Codex subscription quota; Claude Code quota can be shown through a statusline snapshot bridge.
-- Refresh the local index from the tray menu.
+- Refresh the local index and usage stats from the tray menu or in-app controls.
+- Switch between light/dark themes and English/Chinese UI.
 - Toggle the app with `Option+Space` on macOS by default; the shortcut can be changed or disabled in Settings.
 
 ## Supported Sources
@@ -40,6 +42,7 @@ Codex title metadata is read from `~/.codex/session_index.jsonl` when that file 
 | `Space` | Open details for the selected session |
 | `Enter` | Open details for the selected session when the search box is focused |
 | `Cmd/Ctrl+Enter` | Resume the selected session in the default terminal |
+| `Cmd/Ctrl+,` | Open Settings |
 
 ## Data Model
 
@@ -65,6 +68,8 @@ npm install -g .
 If you do not use nvm, make sure `node --version` is 22.13 or newer, then start from `npm ci`.
 
 Once installed, run `agent-session-search` from any terminal to launch it. The app stays in the background (with a menu bar icon); press **⌥ Option + Space** by default to open the search window. If it conflicts with Raycast or another launcher, change or disable the global shortcut in Settings.
+
+Settings can also be opened with `Cmd+,`. Use Appearance to switch the color theme and English / Chinese UI.
 
 For daily use, you do not need to reinstall dependencies or rebuild. Just run:
 
@@ -161,4 +166,4 @@ nvm use
 
 - `README.md` is the Chinese project overview for users and developers.
 - `docs/README.en.md` is the English project overview.
-- `Install.md` is for Coding Agents that need to set up the repository safely on a user's machine.
+- `Install.md` covers install, update, and uninstall steps, plus a safe setup guide for Coding Agents.

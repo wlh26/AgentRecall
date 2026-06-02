@@ -11,35 +11,6 @@ export interface ResumeProcessSpec {
   displayCommand: string;
 }
 
-export interface ResumePtySize {
-  cols: number;
-  rows: number;
-}
-
-export const DEFAULT_RESUME_PTY_SIZE: ResumePtySize = { cols: 100, rows: 30 };
-
-export function normalizeResumePtySize(size?: Partial<ResumePtySize> | null): ResumePtySize {
-  return {
-    cols: Math.max(40, Math.min(240, Math.floor(size?.cols ?? DEFAULT_RESUME_PTY_SIZE.cols))),
-    rows: Math.max(12, Math.min(80, Math.floor(size?.rows ?? DEFAULT_RESUME_PTY_SIZE.rows))),
-  };
-}
-
-export function buildExpectResumePtyScript(size: Partial<ResumePtySize> = DEFAULT_RESUME_PTY_SIZE): string {
-  const normalized = normalizeResumePtySize(size);
-  return `log_user 0
-set stty_init "rows ${normalized.rows} columns ${normalized.cols}"
-spawn -noecho {*}$argv
-log_user 1
-interact
-set status [wait]
-if {[llength $status] >= 4} {
-  exit [lindex $status 3]
-}
-exit 0
-`;
-}
-
 export interface AppSettings {
   defaultTerminal: "Terminal" | "iTerm" | "Ghostty" | "WezTerm" | "Warp";
   globalShortcut: GlobalShortcut;
@@ -118,15 +89,6 @@ export function getResumeProcessSpec(
     args,
     cwd: session.projectPath || undefined,
     displayCommand: getResumeCommand(session, settings, { withCwd: true, skipPermissions }),
-  };
-}
-
-export function getExpectResumeProcessSpec(spec: ResumeProcessSpec, scriptPath: string): ResumeProcessSpec {
-  return {
-    command: "expect",
-    args: [scriptPath, spec.command, ...spec.args],
-    cwd: spec.cwd,
-    displayCommand: spec.displayCommand,
   };
 }
 

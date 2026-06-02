@@ -631,7 +631,7 @@ export class SessionStore {
     reasoning_output_tokens: number;
     total_tokens: number;
   }> {
-    const whereClause = range.since === null ? "" : "WHERE timestamp >= ? AND timestamp <= ?";
+    const whereClause = range.since === null ? "" : "WHERE token_events.timestamp >= ? AND token_events.timestamp <= ?";
     const args = range.since === null ? [] : [range.since, range.until];
     return this.db
       .prepare(
@@ -661,6 +661,7 @@ export class SessionStore {
             ) AS row_rank
           FROM token_events
           JOIN sessions ON sessions.session_key = token_events.session_key
+          ${whereClause}
         ),
         deduped AS (
           SELECT
@@ -683,7 +684,6 @@ export class SessionStore {
           COALESCE(SUM(reasoning_output_tokens), 0) AS reasoning_output_tokens,
           COALESCE(SUM(total_tokens), 0) AS total_tokens
         FROM deduped
-        ${whereClause}
         GROUP BY source
         ORDER BY source
       `,

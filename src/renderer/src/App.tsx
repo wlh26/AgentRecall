@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEventHandler, ReactElement } from "react";
-import { FitAddon } from "@xterm/addon-fit";
-import { Terminal as XTerm } from "@xterm/xterm";
-import "@xterm/xterm/css/xterm.css";
 import {
   AppWindow,
   Archive,
@@ -28,7 +25,6 @@ import {
   RefreshCw,
   Search,
   Settings,
-  Square,
   Star,
   Sun,
   Tag,
@@ -38,12 +34,11 @@ import {
 } from "lucide-react";
 import type { IndexStatus } from "../../core/indexer";
 import { formatMessageTime, formatRelativeTime } from "../../core/format-session";
-import type { AppSettings, ResumePtySize } from "../../core/platform";
+import type { AppSettings } from "../../core/platform";
 import { GLOBAL_SHORTCUT_OPTIONS } from "../../core/shortcuts";
 import type {
   LiveSessionSnapshot,
   ProjectSummary,
-  ResumeConsoleSnapshot,
   SearchOptions,
   SessionMessage,
   SessionSearchResult,
@@ -1355,170 +1350,6 @@ function DetailPanel({
   const actionRunning = actionStatus?.kind === "running";
   const l = (en: string, zh: string) => localize(language, en, zh);
   const bodyRef = useRef<HTMLDivElement>(null);
-  const terminalHostRef = useRef<HTMLDivElement>(null);
-  const terminalRef = useRef<XTerm | null>(null);
-  const terminalFitAddonRef = useRef<FitAddon | null>(null);
-  const terminalWrittenLengthRef = useRef(0);
-  const consoleSnapshotRef = useRef<ResumeConsoleSnapshot | null>(null);
-  const [activeDetailTab, setActiveDetailTab] = useState<"transcript" | "console">("transcript");
-  const [consoleSnapshot, setConsoleSnapshot] = useState<ResumeConsoleSnapshot | null>(null);
-  const [consoleError, setConsoleError] = useState<string | null>(null);
-  const consoleStatus = consoleSnapshot?.status ?? "idle";
-  const consoleRunning = consoleStatus === "starting" || consoleStatus === "running";
-  const consoleWritableRef = useRef(false);
-
-  useEffect(() => {
-    consoleWritableRef.current = consoleRunning;
-  }, [consoleRunning]);
-
-  useEffect(() => {
-    consoleSnapshotRef.current = consoleSnapshot;
-  }, [consoleSnapshot]);
-
-  useEffect(() => {
-    if (activeDetailTab !== "console") return;
-    const host = terminalHostRef.current;
-    if (!host) return;
-    const terminal = new XTerm({
-      cols: 100,
-      rows: 30,
-      cursorBlink: true,
-      convertEol: false,
-      fontFamily: "var(--mono)",
-      fontSize: 12,
-      lineHeight: 1.2,
-      scrollback: 3000,
-      theme: {
-        background: "#0b0f14",
-        foreground: "#d6dde6",
-        cursor: "#d6dde6",
-        selectionBackground: "#334155",
-      },
-    });
-    const fitAddon = new FitAddon();
-    terminal.loadAddon(fitAddon);
-    terminalRef.current = terminal;
-    terminalFitAddonRef.current = fitAddon;
-    terminal.open(host);
-    terminal.focus();
-    terminalWrittenLengthRef.current = 0;
-    let pendingFit = false;
-    let fitFrame: number | null = null;
-    let lastFitWidth = 0;
-    let lastFitHeight = 0;
-    const fitTerminal = () => {
-      if (pendingFit) return;
-      pendingFit = true;
-      fitFrame = requestAnimationFrame(() => {
-        fitFrame = null;
-        pendingFit = false;
-        if (!host.isConnected) return;
-        const rect = host.getBoundingClientRect();
-        if (!rect.width || !rect.height) return;
-        if (Math.abs(rect.width - lastFitWidth) < 1 && Math.abs(rect.height - lastFitHeight) < 1) return;
-        lastFitWidth = rect.width;
-        lastFitHeight = rect.height;
-        try {
-          fitAddon.fit();
-        } catch {
-          // xterm can throw while its DOM is being detached.
-        }
-      });
-    };
-    fitTerminal();
-    window.addEventListener("resize", fitTerminal);
-    const dataSubscription = terminal.onData((data) => {
-      if (!consoleWritableRef.current) return;
-      void window.sessionSearch.resumeConsoleWrite(session.sessionKey, data).catch((error) => {
-        setConsoleError(error instanceof Error ? error.message : String(error));
-      });
-    });
-    const output = consoleSnapshotRef.current?.output ?? "";
-    if (output) {
-      terminal.write(output);
-      terminalWrittenLengthRef.current = output.length;
-    }
-
-    return () => {
-      window.removeEventListener("resize", fitTerminal);
-      if (fitFrame !== null) cancelAnimationFrame(fitFrame);
-      dataSubscription.dispose();
-      terminal.dispose();
-      fitAddon.dispose();
-      terminalRef.current = null;
-      terminalFitAddonRef.current = null;
-      terminalWrittenLengthRef.current = 0;
-    };
-  }, [activeDetailTab, session.sessionKey]);
-
-  useEffect(() => {
-    let mounted = true;
-    setConsoleError(null);
-    void window.sessionSearch.resumeConsoleGet(session.sessionKey).then((snapshot) => {
-      if (mounted) setConsoleSnapshot(snapshot);
-    });
-    const off = window.sessionSearch.onResumeConsoleEvent((event) => {
-      if (event.sessionKey !== session.sessionKey) return;
-      setConsoleSnapshot(event.snapshot);
-    });
-    return () => {
-      mounted = false;
-      off();
-    };
-  }, [session.sessionKey]);
-
-  useEffect(() => {
-    const terminal = terminalRef.current;
-    if (!terminal || !consoleSnapshot) return;
-    const writtenLength = terminalWrittenLengthRef.current;
-    const output = consoleSnapshot.output;
-    if (writtenLength > output.length) {
-      terminal.reset();
-      terminal.write(output);
-      terminalWrittenLengthRef.current = output.length;
-      return;
-    }
-    if (writtenLength === output.length) return;
-    terminal.write(output.slice(writtenLength));
-    terminalWrittenLengthRef.current = output.length;
-  }, [consoleSnapshot?.output]);
-
-  function getConsoleTerminalSize(): ResumePtySize {
-    const terminal = terminalRef.current;
-    const fitAddon = terminalFitAddonRef.current;
-    if (terminal && fitAddon) {
-      try {
-        fitAddon.fit();
-      } catch {
-        // Keep the current terminal dimensions if fitting races with DOM updates.
-      }
-    }
-    return {
-      cols: terminal?.cols ?? 100,
-      rows: terminal?.rows ?? 30,
-    };
-  }
-
-  async function handleResumeInApp(): Promise<void> {
-    setActiveDetailTab("console");
-    setConsoleError(null);
-    try {
-      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-      setConsoleSnapshot(await window.sessionSearch.resumeConsoleStart(session.sessionKey, getConsoleTerminalSize()));
-    } catch (error) {
-      setConsoleError(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  async function handleConsoleStop(): Promise<void> {
-    setConsoleError(null);
-    try {
-      setConsoleSnapshot(await window.sessionSearch.resumeConsoleStop(session.sessionKey));
-    } catch (error) {
-      setConsoleError(error instanceof Error ? error.message : String(error));
-    }
-  }
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -1600,9 +1431,6 @@ function DetailPanel({
         <button onClick={onResume} disabled={actionRunning}>
           <Play size={15} /> Resume
         </button>
-        <button onClick={() => void handleResumeInApp()} disabled={actionRunning || consoleRunning}>
-          <TerminalIcon size={15} /> {l("Resume in App", "应用内恢复")}
-        </button>
         <button onClick={onResumeIterm} disabled={actionRunning}>
           <TerminalIcon size={15} /> iTerm
         </button>
@@ -1634,65 +1462,28 @@ function DetailPanel({
           </button>
         ))}
       </div>
-      <div className="detail-tabs" role="tablist" aria-label="Session detail views">
-        <button className={activeDetailTab === "transcript" ? "active" : ""} onClick={() => setActiveDetailTab("transcript")}>
-          {l("Transcript", "记录")}
-        </button>
-        <button className={activeDetailTab === "console" ? "active" : ""} onClick={() => setActiveDetailTab("console")}>
-          Console
-          <span className={`console-status-pill ${consoleStatus}`}>{consoleStatus}</span>
-        </button>
-      </div>
       <div className="detail-body" ref={bodyRef}>
-        {activeDetailTab === "transcript" ? (
-          <>
-            {context.length > 0 ? (
-              <section className="matched">
-                <h3>{l("Matched Context", "命中上下文")}</h3>
-                {context.map((message) => (
-                  <MessageBlock key={message.index} message={message} query={query} language={language} />
-                ))}
-              </section>
-            ) : null}
-            <section className="conversation">
-              <h3>{l("Full Conversation", "完整会话")}</h3>
-              {loading ? <div className="loading-state">{l("Loading conversation...", "正在加载会话...")}</div> : null}
-              {!loading && messages.length === 0 ? <div className="loading-state">{l("No visible messages indexed for this session.", "这个会话没有可见消息被索引。")}</div> : null}
-              {messages.map((message) => (
-                <MessageBlock key={message.index} message={message} query={query} language={language} />
-              ))}
-              {!loading && messages.length < session.messageCount ? (
-                <button className="show-more" onClick={onShowMore}>
-                  {l(`Show ${Math.min(MESSAGE_PAGE_SIZE, session.messageCount - messages.length)} more messages`, `再显示 ${Math.min(MESSAGE_PAGE_SIZE, session.messageCount - messages.length)} 条消息`)}
-                </button>
-              ) : null}
-            </section>
-          </>
-        ) : (
-          <section className="resume-console">
-            <div className="resume-console-head">
-              <div>
-                <h3>Console</h3>
-                <p>{consoleSnapshot?.command ?? l("Start an in-app resume session for this conversation.", "为这个会话启动应用内 resume。")}</p>
-              </div>
-              <div className="resume-console-actions">
-                <button onClick={() => void handleResumeInApp()} disabled={consoleRunning}>
-                  <Play size={14} /> {l("Start", "启动")}
-                </button>
-                <button onClick={() => void handleConsoleStop()} disabled={!consoleRunning}>
-                  <Square size={13} /> {l("Stop", "停止")}
-                </button>
-              </div>
-            </div>
-            {consoleError ? <div className="resume-console-error">{consoleError}</div> : null}
-            <div
-              ref={terminalHostRef}
-              className="resume-console-terminal"
-              aria-label={l("Resume terminal", "Resume 终端")}
-              onClick={() => terminalRef.current?.focus()}
-            />
+        {context.length > 0 ? (
+          <section className="matched">
+            <h3>{l("Matched Context", "命中上下文")}</h3>
+            {context.map((message) => (
+              <MessageBlock key={message.index} message={message} query={query} language={language} />
+            ))}
           </section>
-        )}
+        ) : null}
+        <section className="conversation">
+          <h3>{l("Full Conversation", "完整会话")}</h3>
+          {loading ? <div className="loading-state">{l("Loading conversation...", "正在加载会话...")}</div> : null}
+          {!loading && messages.length === 0 ? <div className="loading-state">{l("No visible messages indexed for this session.", "这个会话没有可见消息被索引。")}</div> : null}
+          {messages.map((message) => (
+            <MessageBlock key={message.index} message={message} query={query} language={language} />
+          ))}
+          {!loading && messages.length < session.messageCount ? (
+            <button className="show-more" onClick={onShowMore}>
+              {l(`Show ${Math.min(MESSAGE_PAGE_SIZE, session.messageCount - messages.length)} more messages`, `再显示 ${Math.min(MESSAGE_PAGE_SIZE, session.messageCount - messages.length)} 条消息`)}
+            </button>
+          ) : null}
+        </section>
       </div>
     </aside>
     </div>
