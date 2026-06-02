@@ -27,6 +27,12 @@ agent-session-search
 >
 > SQLite 说明：项目使用 Electron 42 自带的 `node:sqlite`。安装时会下载 Electron binary（约 100MB+），但**不需要 Xcode、node-gyp、better-sqlite3 或 electron-rebuild**。
 
+> 国内网络提示：Electron binary 默认从 GitHub release 下载。如果下载很慢或失败，可在安装前设置镜像后再执行安装命令：
+>
+> ```bash
+> export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+> ```
+
 ### 更新到新版本
 
 先拉取最新代码，再重新跑安装命令：
