@@ -14,7 +14,7 @@ export interface LoadLiveSessionOptions {
   now?: Date;
 }
 
-export function detectLiveSessionsFromProcessLines(lines: string[]): LiveSession[] {
+export function detectLiveSessionsFromProcessLines(lines: string[], codexSessionFilesByPid: Map<number, string> = new Map()): LiveSession[] {
   const sessions: LiveSession[] = [];
   const seen = new Set<string>();
 
@@ -23,7 +23,7 @@ export function detectLiveSessionsFromProcessLines(lines: string[]): LiveSession
     if (!entry) continue;
 
     const tokens = splitCommandLine(entry.command);
-    const command = detectResumeCommand(tokens);
+    const command = detectResumeCommand(tokens) ?? detectPlainCodexCommand(tokens, codexSessionFilesByPid.get(entry.pid));
     if (!command) continue;
 
     const key = `${command.family}:${command.rawId}`;
@@ -49,10 +49,12 @@ export async function loadLiveSessionSnapshot(options: LoadLiveSessionOptions = 
             'Get-CimInstance Win32_Process | ForEach-Object { if ($_.CommandLine) { "{0} {1}" -f $_.ProcessId, $_.CommandLine } }',
           ])
         : await runner("/bin/ps", ["-axo", "pid=,command="]);
+    const lines = output.split(/\r?\n/);
+    const codexSessionFilesByPid = platform === "win32" ? new Map<number, string>() : await loadPlainCodexSessionFiles(lines, runner);
 
     return {
       generatedAt,
-      sessions: detectLiveSessionsFromProcessLines(output.split(/\r?\n/)),
+      sessions: detectLiveSessionsFromProcessLines(lines, codexSessionFilesByPid),
     };
   } catch (error) {
     return {
@@ -61,6 +63,28 @@ export async function loadLiveSessionSnapshot(options: LoadLiveSessionOptions = 
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+async function loadPlainCodexSessionFiles(lines: string[], runner: ProcessListRunner): Promise<Map<number, string>> {
+  const sessionFiles = new Map<number, string>();
+  const entries = lines.map(parseProcessLine).filter((entry): entry is ProcessEntry => Boolean(entry));
+  const pids = entries
+    .filter((entry) => isPlainCodexCommand(splitCommandLine(entry.command)))
+    .map((entry) => entry.pid);
+
+  await Promise.all(
+    pids.map(async (pid) => {
+      try {
+        const output = await runner("lsof", ["-p", String(pid)]);
+        const sessionFile = extractCodexSessionFile(output);
+        if (sessionFile) sessionFiles.set(pid, sessionFile);
+      } catch {
+        // A process can exit between ps and lsof; ignore it and keep the rest.
+      }
+    }),
+  );
+
+  return sessionFiles;
 }
 
 function parseProcessLine(line: string): ProcessEntry | null {
@@ -87,6 +111,27 @@ function detectResumeCommand(tokens: string[]): { family: LiveSessionFamily; raw
   }
 
   return null;
+}
+
+function detectPlainCodexCommand(tokens: string[], sessionFile: string | undefined): { family: LiveSessionFamily; rawId: string } | null {
+  if (!sessionFile || !isPlainCodexCommand(tokens)) return null;
+  const rawId = extractCodexSessionId(sessionFile);
+  return rawId ? { family: "codex", rawId } : null;
+}
+
+function isPlainCodexCommand(tokens: string[]): boolean {
+  const commandStartIndexes = isNodeExecutable(tokens[0]) ? [1] : [0];
+
+  for (const index of commandStartIndexes) {
+    const family = executableFamily(tokens[index]);
+    if (family !== "codex") continue;
+    const args = tokens.slice(index + 1);
+    if (args.includes("resume")) return false;
+    if (args[0] === "app-server") return false;
+    return true;
+  }
+
+  return false;
 }
 
 function codexResumeId(args: string[]): string | null {
@@ -137,6 +182,18 @@ function normalizedExecutableName(token: string | undefined): string {
   return name.replace(/\.(?:js|cjs|mjs|cmd|exe)$/i, "");
 }
 
+function extractCodexSessionFile(lsofOutput: string): string | null {
+  for (const line of lsofOutput.split(/\r?\n/)) {
+    const match = line.match(/(\S*\.codex\/sessions\/\S+?\.jsonl)\b/);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+function extractCodexSessionId(sessionFile: string): string | null {
+  return sessionFile.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/)?.[1] ?? null;
+}
+
 function splitCommandLine(command: string): string[] {
   const tokens: string[] = [];
   let token = "";
@@ -177,7 +234,7 @@ function splitCommandLine(command: string): string[] {
 
 function execText(command: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile(command, args, { maxBuffer: 4 * 1024 * 1024, timeout: command === "lsof" ? 1500 : undefined }, (error, stdout, stderr) => {
       if (!error) {
         resolve(stdout);
         return;

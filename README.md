@@ -52,13 +52,40 @@ SQLite 数据库属于运行时状态，不应该提交到 git。
 
 ## 安装使用
 
-要求 macOS 和 Node.js 22.13+（含 npm）。进入仓库目录后，执行下面这一行即可安装依赖、构建并注册全局命令：
+要求 macOS 和 Node.js 22.13+（含 npm）。进入仓库目录后，执行下面命令即可安装依赖、构建并注册全局命令：
 
 ```bash
-nvm use 22 && rm -rf node_modules && npm ci && npm run build && npm install -g .
+nvm install 22
+nvm use 22
+npm ci
+npm run build
+npm install -g .
 ```
 
+如果你不用 nvm，只要本机 `node --version` 是 22.13 或更高版本，可以直接从 `npm ci` 开始执行。
+
 装好后，在任意终端运行 `agent-session-search` 即可启动。应用常驻后台（菜单栏有图标），默认按 **⌥ Option + Space** 唤起搜索窗口；如果和 Raycast 等工具冲突，可以在 Settings 里修改或关闭全局快捷键。
+
+后续日常启动不需要重新执行安装命令，也不需要重新 build，直接运行：
+
+```bash
+agent-session-search
+```
+
+如果新终端提示 `agent-session-search: command not found`，通常是因为全局命令安装在 nvm 的 Node 22 目录下，但当前 shell 没有选中 Node 22。可以先运行：
+
+```bash
+nvm use 22
+agent-session-search
+```
+
+也可以一次性设置默认 Node 版本，之后新终端就不需要手动 `nvm use 22`：
+
+```bash
+nvm alias default 22
+```
+
+如果你不用 nvm，而是系统里直接安装了 Node.js 22.13+，后续启动不需要任何 nvm 命令。
 
 更新、卸载、从源码克隆、网络镜像等详情见 [Install.md](./Install.md)。
 

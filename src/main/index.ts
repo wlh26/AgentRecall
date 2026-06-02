@@ -24,6 +24,7 @@ import {
   revealInFileManager,
 } from "../core/platform";
 import { loadUsageQuotaSnapshot } from "../core/quota";
+import { focusLiveSessionTerminal, liveSessionPidForSession } from "../core/session-focus";
 import { loadLiveSessionSnapshot } from "../core/session-activity";
 import { SessionStore } from "../core/session-store";
 import { AUTO_INDEX_REFRESH_INTERVAL_MS, INITIAL_INDEX_DELAY_MS } from "../core/refresh-policy";
@@ -346,6 +347,15 @@ function registerIpc(): void {
     if (!session) return;
     store.markResumed(sessionKey);
     await openResumeInSpecificTerminal(session, getSettings(), "iTerm");
+  });
+  ipcMain.handle("command:focus-live-terminal", async (_event, sessionKey: string) => {
+    const session = store.getSession(sessionKey);
+    if (!session) return;
+    const snapshot = await loadLiveSessionSnapshot();
+    if (snapshot.error) throw new Error(`Live session detection failed: ${snapshot.error}`);
+    const pid = liveSessionPidForSession(session, snapshot.sessions);
+    if (!pid) throw new Error("This session is not currently open in a detected terminal.");
+    await focusLiveSessionTerminal(pid);
   });
   ipcMain.handle("command:open-app", async (_event, sessionKey: string) => {
     const session = store.getSession(sessionKey);

@@ -2,11 +2,17 @@
 
 ## 安装并使用（给使用者）
 
-进入仓库目录后，执行下面这一行即可重新安装依赖、构建并注册全局命令：
+进入仓库目录后，先确认 Node.js 22 可用，再安装依赖、构建并注册全局命令：
 
 ```bash
-nvm use 22 && rm -rf node_modules && npm ci && npm run build && npm install -g .
+nvm install 22
+nvm use 22
+npm ci
+npm run build
+npm install -g .
 ```
+
+如果你不用 nvm，只要本机 `node --version` 是 22.13 或更高版本，可以直接从 `npm ci` 开始执行。
 
 装好后，在任意终端运行即可启动：
 
@@ -15,6 +21,29 @@ agent-session-search
 ```
 
 应用启动后常驻后台（菜单栏有图标），默认按 **⌥ Option + Space** 唤起搜索窗口；如果和 Raycast 等工具冲突，可以在 Settings 里修改或关闭全局快捷键。
+
+### 后续启动还要 `nvm use 22` 吗？
+
+不需要重新执行 `npm ci`、`npm run build` 或 `npm install -g .`。日常启动只需要：
+
+```bash
+agent-session-search
+```
+
+如果新终端里提示 `agent-session-search: command not found`，通常是因为全局命令安装在 nvm 的 Node 22 目录下，但当前 shell 没有选中 Node 22。可以二选一：
+
+```bash
+nvm use 22
+agent-session-search
+```
+
+或者一次性把 Node 22 设成 nvm 默认版本，之后新终端就不需要手动 `nvm use 22`：
+
+```bash
+nvm alias default 22
+```
+
+如果你不用 nvm，而是系统里直接安装了 Node.js 22.13+，后续启动也不需要任何 nvm 命令。
 
 > ⚠️ **请勿删除或移动这个仓库目录。** `npm install -g .` 注册的全局命令是一个指向本仓库的符号链接（npm 对本地目录安装的默认行为），它在运行时会从仓库内的 `node_modules` 加载 Electron 与构建产物 `out/`。如果之后删除、改名或移动了仓库，全局 `agent-session-search` 命令会因为链接失效而无法启动。需要换位置时，请在新位置重新执行一次安装命令。
 
@@ -34,7 +63,12 @@ export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
 先拉取最新代码，再重新跑安装命令：
 
 ```bash
-git pull --ff-only && nvm use 22 && rm -rf node_modules && npm ci && npm run build && npm install -g .
+git pull --ff-only
+nvm install 22
+nvm use 22
+npm ci
+npm run build
+npm install -g .
 ```
 
 ### 卸载
@@ -63,14 +97,14 @@ Bootstrap a local development workspace for Agent-Session-Search with the least 
 
 Default preference:
 
-1. Install dependencies with npm.
+1. Install dependencies from the lockfile with npm.
 2. Verify the app with tests and type checks.
 3. Start the Electron development app only when the user asks to run it.
 
 ## Success Criteria
 
 - The repository root is confirmed by checking `package.json`, `src/`, and `electron.vite.config.ts`.
-- `node_modules/` exists after `npm install`.
+- `node_modules/` exists after `npm ci`.
 - `npm test` passes.
 - `npm run typecheck` passes.
 - `npm run build` passes when the user wants a build verification.
@@ -174,7 +208,7 @@ This means the app is running under an Electron version that is too old for the 
 Fix:
 
 ```bash
-npm install
+npm ci
 npm run typecheck
 npm run build
 ```
@@ -227,7 +261,7 @@ Do not edit, rewrite, or delete those source files during installation.
 ## TODO
 
 - [ ] Confirm the repository root.
-- [ ] Install dependencies with `npm install`.
+- [ ] Install dependencies with `npm ci`.
 - [ ] Run `npm test`.
 - [ ] Run `npm run typecheck`.
 - [ ] Run `npm run build` if build verification is requested.

@@ -52,13 +52,40 @@ The SQLite database is runtime state and is intentionally ignored by git.
 
 ## Installation
 
-Requires macOS and Node.js 22.13+ (with npm). From the repository root, run this single line to install dependencies, build, and register the global command:
+Requires macOS and Node.js 22.13+ (with npm). From the repository root, run these commands to install dependencies, build, and register the global command:
 
 ```bash
-nvm use 22 && rm -rf node_modules && npm ci && npm run build && npm install -g .
+nvm install 22
+nvm use 22
+npm ci
+npm run build
+npm install -g .
 ```
 
+If you do not use nvm, make sure `node --version` is 22.13 or newer, then start from `npm ci`.
+
 Once installed, run `agent-session-search` from any terminal to launch it. The app stays in the background (with a menu bar icon); press **⌥ Option + Space** by default to open the search window. If it conflicts with Raycast or another launcher, change or disable the global shortcut in Settings.
+
+For daily use, you do not need to reinstall dependencies or rebuild. Just run:
+
+```bash
+agent-session-search
+```
+
+If a new terminal says `agent-session-search: command not found`, the global command was probably installed under nvm's Node 22 directory while the current shell is using another Node version. Run:
+
+```bash
+nvm use 22
+agent-session-search
+```
+
+Or set Node 22 as your nvm default once:
+
+```bash
+nvm alias default 22
+```
+
+If you do not use nvm and have Node.js 22.13+ installed system-wide, daily startup does not need any nvm command.
 
 See [Install.md](../Install.md) for updating, uninstalling, installing from a fresh clone, and network mirror tips.
 

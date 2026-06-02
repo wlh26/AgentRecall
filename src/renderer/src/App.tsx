@@ -3,6 +3,7 @@ import type { CSSProperties, MouseEventHandler, ReactElement } from "react";
 import {
   AppWindow,
   Archive,
+  BringToFront,
   ChevronDown,
   ChevronRight,
   Clipboard,
@@ -961,6 +962,7 @@ export function App(): ReactElement {
       {contextMenu ? (
         <ContextMenu
           state={contextMenu}
+          liveState={getLiveSessionState(contextMenu.session, liveSessionKeys, liveDetectionFailed)}
           onRename={() => beginRename(contextMenu.session)}
           onAddTag={() => beginAddTag(contextMenu.session)}
           onFavorite={() =>
@@ -985,6 +987,13 @@ export function App(): ReactElement {
           }
           onResumeIterm={() =>
             void runAction("Opening iTerm", () => window.sessionSearch.resumeSessionInIterm(contextMenu.session.sessionKey), "Resume command sent to iTerm.")
+          }
+          onFocusTerminal={() =>
+            void runAction(
+              "Bringing terminal forward",
+              () => window.sessionSearch.focusLiveTerminal(contextMenu.session.sessionKey),
+              "Terminal brought to front.",
+            )
           }
           onOpenApp={() =>
             void runAction("Opening native app", () => window.sessionSearch.openNativeApp(contextMenu.session.sessionKey), "Native app opened.")
@@ -1421,6 +1430,7 @@ function ActionToast({ status }: { status: ActionStatus }): ReactElement {
 
 function ContextMenu({
   state,
+  liveState,
   onRename,
   onAddTag,
   onFavorite,
@@ -1428,6 +1438,7 @@ function ContextMenu({
   onHide,
   onResume,
   onResumeIterm,
+  onFocusTerminal,
   onOpenApp,
   onCopyResume,
   onCopyMarkdown,
@@ -1435,6 +1446,7 @@ function ContextMenu({
   onReveal,
 }: {
   state: ContextMenuState;
+  liveState: LiveSessionState;
   onRename: () => void;
   onAddTag: () => void;
   onFavorite: () => void;
@@ -1442,6 +1454,7 @@ function ContextMenu({
   onHide: () => void;
   onResume: () => void;
   onResumeIterm: () => void;
+  onFocusTerminal: () => void;
   onOpenApp: () => void;
   onCopyResume: () => void;
   onCopyMarkdown: () => void;
@@ -1471,6 +1484,11 @@ function ContextMenu({
       <button onClick={onResumeIterm}>
         <Terminal size={14} /> Resume in iTerm
       </button>
+      {liveState === "open" ? (
+        <button onClick={onFocusTerminal}>
+          <BringToFront size={14} /> Bring to Front
+        </button>
+      ) : null}
       <button onClick={onOpenApp}>
         <AppWindow size={14} /> Open App
       </button>
