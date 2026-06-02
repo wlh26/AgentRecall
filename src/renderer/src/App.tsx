@@ -897,14 +897,6 @@ export function App(): ReactElement {
           <div className="top-actions">
             <button
               className="icon-button toolbar-icon-button"
-              onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-              title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-              aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-            >
-              {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
-            </button>
-            <button
-              className="icon-button toolbar-icon-button"
               onClick={() => setSettingsOpen(true)}
               title="Settings"
               aria-label="Settings"
@@ -1058,8 +1050,10 @@ export function App(): ReactElement {
       {settingsOpen ? (
         <SettingsDialog
           settings={appSettings}
+          theme={theme}
           feedback={settingsFeedback}
           onSettingsChange={(next) => void updateSettings(next)}
+          onThemeChange={setTheme}
           onDefaultTerminalChange={(terminal) => void updateDefaultTerminal(terminal)}
           onGlobalShortcutChange={(shortcut) => void updateGlobalShortcut(shortcut)}
           onClose={() => setSettingsOpen(false)}
@@ -1537,15 +1531,19 @@ function ContextMenu({
 
 function SettingsDialog({
   settings,
+  theme,
   feedback,
   onSettingsChange,
+  onThemeChange,
   onDefaultTerminalChange,
   onGlobalShortcutChange,
   onClose,
 }: {
   settings: AppSettings | null;
+  theme: ThemeMode;
   feedback: SettingsFeedback;
   onSettingsChange: (settings: Partial<AppSettings>) => void;
+  onThemeChange: (theme: ThemeMode) => void;
   onDefaultTerminalChange: (terminal: AppSettings["defaultTerminal"]) => void;
   onGlobalShortcutChange: (shortcut: AppSettings["globalShortcut"]) => void;
   onClose: () => void;
@@ -1553,7 +1551,7 @@ function SettingsDialog({
   const defaultTerminal = settings?.defaultTerminal ?? "Terminal";
   const globalShortcut = settings?.globalShortcut ?? "Alt+Space";
   const saving = feedback?.kind === "running";
-  const [activeSection, setActiveSection] = useState<"terminal" | "shortcut" | "sources">("terminal");
+  const [activeSection, setActiveSection] = useState<"terminal" | "shortcut" | "sources" | "appearance">("terminal");
 
   return (
     <div className="dialog-backdrop" onMouseDown={onClose}>
@@ -1577,6 +1575,10 @@ function SettingsDialog({
             <button className={activeSection === "sources" ? "active" : ""} onClick={() => setActiveSection("sources")}>
               <Folder size={15} />
               <span>Personal sources</span>
+            </button>
+            <button className={activeSection === "appearance" ? "active" : ""} onClick={() => setActiveSection("appearance")}>
+              <Sun size={15} />
+              <span>Appearance</span>
             </button>
           </nav>
           <div className="settings-content">
@@ -1677,6 +1679,30 @@ function SettingsDialog({
                     onChange={(event) => onSettingsChange({ includeCodeBuddyCli: event.currentTarget.checked })}
                   />
                 </label>
+              </section>
+            ) : null}
+            {activeSection === "appearance" ? (
+              <section className="settings-pane">
+                <header className="settings-pane-head">
+                  <h3>Appearance</h3>
+                  <p>Choose the color theme used by the session search window.</p>
+                </header>
+                <div className="settings-field">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">Theme</span>
+                    <span className="settings-field-sub">Saved on this device.</span>
+                  </div>
+                  <div className="theme-setting-toggle" role="group" aria-label="Theme">
+                    <button className={theme === "light" ? "active" : ""} onClick={() => onThemeChange("light")}>
+                      <Sun size={14} />
+                      <span>Light</span>
+                    </button>
+                    <button className={theme === "dark" ? "active" : ""} onClick={() => onThemeChange("dark")}>
+                      <Moon size={14} />
+                      <span>Dark</span>
+                    </button>
+                  </div>
+                </div>
               </section>
             ) : null}
           </div>
