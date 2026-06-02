@@ -18,6 +18,7 @@ import { formatSessionMarkdown, formatSessionPlainText } from "../core/format-se
 import {
   defaultSettings,
   getResumeCommand,
+  normalizeTerminal,
   openNativeApp,
   openResumeInSpecificTerminal,
   openResumeInTerminal,
@@ -52,7 +53,11 @@ const settingsStore = new Store<AppSettings>({
 
 function getSettings(): AppSettings {
   const settings = { ...defaultSettings, ...settingsStore.store };
-  return { ...settings, globalShortcut: normalizeGlobalShortcut(settings.globalShortcut) };
+  return {
+    ...settings,
+    globalShortcut: normalizeGlobalShortcut(settings.globalShortcut),
+    defaultTerminal: normalizeTerminal(settings.defaultTerminal),
+  };
 }
 
 function getPreferredWindowBounds(): { width: number; height: number; x: number; y: number } {
