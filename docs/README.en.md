@@ -1,6 +1,21 @@
-# Agent-Session-Search
+<h1 align="center">Agent-Session-Search</h1>
 
-[中文文档](../README.md)
+<p align="center">A local desktop tool to search, organize, and resume your Claude Code / Codex / CodeBuddy session history in one place</p>
+
+<p align="center">
+  <a href="../README.md">简体中文</a> ｜ English
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-555555" alt="platform">
+  <img src="https://img.shields.io/badge/Electron-42-47848F?logo=electron&logoColor=white" alt="Electron">
+  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React">
+  <img src="https://img.shields.io/badge/Node-%E2%89%A5%2022.13-339933?logo=nodedotjs&logoColor=white" alt="Node">
+</p>
+
+<p align="center">
+  <img src="../assets/show.png" alt="Agent-Session-Search preview" width="860">
+</p>
 
 Agent-Session-Search is a local desktop console for finding, organizing, and resuming Claude Code and Codex sessions.
 
@@ -51,11 +66,11 @@ Agent-Session-Search keeps two kinds of data separate:
 - Upstream session data stays in the original Claude and Codex files and is treated as read-only input.
 - App metadata, including custom titles, tags, pinned state, hidden state, and the search index, is stored in a local SQLite database under Electron's `userData` directory.
 
-The SQLite database is runtime state and is intentionally ignored by git.
-
 ## Installation
 
-Requires macOS and Node.js 22.13+ (with npm). From the repository root, run these commands to install dependencies, build, and register the global command:
+### macOS
+
+Requires Node.js 22.13+ (with npm). From the repository root, run these commands to install dependencies, build, and register the global command:
 
 ```bash
 nvm install 22
@@ -92,36 +107,23 @@ nvm alias default 22
 
 If you do not use nvm and have Node.js 22.13+ installed system-wide, daily startup does not need any nvm command.
 
-See [Install.md](../Install.md) for updating, uninstalling, installing from a fresh clone, and network mirror tips.
+### Windows
 
-### Claude Code Quota Bridge
+With Node.js 22.13+ installed, run this from the repository root in PowerShell:
 
-Codex quota is loaded read-only through `~/.codex/auth.json`. Claude Code does not expose an equivalent local quota file or read-only usage API; quota appears in the `rate_limits` field passed to statusline commands.
-
-**This is configured automatically on install.** The `postinstall` hook runs `bin/install-claude-statusline.cjs` during `npm install` (including `npm install -g .`) and writes the following into `~/.claude/settings.json`:
-
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "agent-session-search-claude-statusline"
-  }
-}
+```powershell
+npm ci && npm run build && npm install -g .
 ```
 
-Then run Claude Code once and wait for the first API response. The bridge writes `~/.claude/statusline-snapshot.json`, which the app reads on Usage refresh. The script stores only `rate_limits`, optional plan, and update time, not the full statusline input.
+Once installed, run `agent-session-search` from any terminal to launch it. The app stays in the background (with a taskbar/tray icon); press **Ctrl + Alt + Space** by default to open the search window.
 
-The auto-setup is **non-destructive**:
-
-- If you already have a custom `statusLine`, the installer leaves it untouched and prints how to enable Claude quota manually (point `statusLine.command` at `agent-session-search-claude-statusline`, or `node "<install dir>/bin/claude-statusline-snapshot.cjs"`).
-- Set `AGENT_SESSION_SEARCH_SKIP_STATUSLINE_INSTALL=1`, or run under `CI`, to skip the auto-setup.
-- The installer always exits 0, so it never fails `npm install`.
+See [Install.md](../Install.md) for updating, uninstalling, installing from a fresh clone, and network mirror tips.
 
 ## Development Setup
 
 Requirements:
 
-- macOS
+- macOS or Windows
 - Node.js 22.13 or newer
 - npm
 
@@ -147,16 +149,6 @@ Build the app bundle output:
 
 ```bash
 npm run build
-```
-
-## SQLite Notes
-
-This project uses Node/Electron's built-in `node:sqlite`, so it does not need a native SQLite npm module or runtime-specific rebuild scripts.
-
-If you use nvm, run this from the repository root:
-
-```bash
-nvm use
 ```
 
 ## Useful Scripts
