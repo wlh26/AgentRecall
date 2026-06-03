@@ -6,23 +6,34 @@ const preloadSource = readFileSync(new URL("../../preload/index.ts", import.meta
 const mainSource = readFileSync(new URL("../../main/index.ts", import.meta.url), "utf8");
 
 describe("detail panel actions", () => {
-  it("exposes terminal focus and markdown export in the detail panel", () => {
+  it("keeps resume routed and removes standalone terminal focus from the detail panel", () => {
     const detailPanel = appSource.slice(appSource.indexOf("function DetailPanel"), appSource.indexOf("function MessageBlock"));
 
-    expect(detailPanel).toContain("onFocusTerminal");
+    expect(detailPanel).toContain("onResume");
     expect(detailPanel).toContain("onExportMarkdown");
-    expect(detailPanel).toMatch(/Bring to Front/);
+    expect(detailPanel).not.toContain("onFocusTerminal");
+    expect(detailPanel).not.toMatch(/Bring to Front/);
     expect(detailPanel).toMatch(/Export MD/);
-    expect(detailPanel).toMatch(/disabled=\{actionRunning \|\| liveState !== "open"\}/);
   });
 
-  it("keeps right-click terminal focus and markdown export without plain text copy", () => {
+  it("keeps right-click resume and markdown export without standalone terminal focus or plain text copy", () => {
     const contextMenu = appSource.slice(appSource.indexOf("function ContextMenu"), appSource.indexOf("function SettingsDialog"));
 
-    expect(contextMenu).toMatch(/Bring to Front/);
-    expect(contextMenu).toMatch(/disabled=\{liveState !== "open"\}/);
+    expect(contextMenu).toMatch(/Resume in Terminal/);
+    expect(contextMenu).not.toMatch(/Bring to Front/);
+    expect(contextMenu).not.toContain("onFocusTerminal");
     expect(contextMenu).toMatch(/Export Markdown/);
     expect(contextMenu).not.toMatch(/Copy Plain Text/);
+  });
+
+  it("routes resume through one IPC command and hides direct terminal focus IPC", () => {
+    expect(preloadSource).toContain("resumeSession");
+    expect(preloadSource).toContain("command:resume");
+    expect(preloadSource).not.toContain("focusLiveTerminal");
+    expect(preloadSource).not.toContain("command:focus-live-terminal");
+    expect(mainSource).toContain("routeResumeSession");
+    expect(mainSource).toContain("command:resume");
+    expect(mainSource).not.toContain("command:focus-live-terminal");
   });
 
   it("wires markdown export through IPC to a save dialog", () => {

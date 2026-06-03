@@ -63,4 +63,20 @@ describe("live session focus", () => {
       args: ["-e", 'tell application "iTerm" to activate'],
     });
   });
+
+  it("uses PowerShell to focus the owning terminal window on Windows", async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const runner = async (command: string, args: string[]): Promise<string> => {
+      calls.push({ command, args });
+      return "";
+    };
+
+    await focusLiveSessionTerminal(404, { platform: "win32", runner });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].command).toBe("powershell.exe");
+    expect(calls[0].args).toEqual(expect.arrayContaining(["-NoProfile", "-Command"]));
+    expect(calls[0].args.at(-1)).toContain("$targetProcessId = 404");
+    expect(calls[0].args.at(-1)).toContain("SetForegroundWindow");
+  });
 });

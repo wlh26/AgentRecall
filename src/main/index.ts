@@ -27,8 +27,9 @@ import {
   revealInFileManager,
 } from "../core/platform";
 import { loadUsageQuotaSnapshot } from "../core/quota";
-import { focusLiveSessionTerminal, liveSessionPidForSession } from "../core/session-focus";
+import { focusLiveSessionTerminal } from "../core/session-focus";
 import { loadLiveSessionSnapshot } from "../core/session-activity";
+import { routeResumeSession } from "../core/resume-router";
 import { SessionStore } from "../core/session-store";
 import { listInstalledSkills } from "../core/skill-manager";
 import { AUTO_INDEX_REFRESH_INTERVAL_MS, INITIAL_INDEX_DELAY_MS } from "../core/refresh-policy";
@@ -382,24 +383,23 @@ function registerIpc(): void {
   });
   ipcMain.handle("command:resume", async (_event, sessionKey: string) => {
     const session = store.getSession(sessionKey);
-    if (!session) return;
+    if (!session) return { route: "resume" as const };
+    const snapshot = await loadLiveSessionSnapshot();
+    const route = snapshot.error ? { route: "resume" as const } : routeResumeSession(session, snapshot.sessions);
+    if (route.route === "focus") {
+      await focusLiveSessionTerminal(route.pid);
+      store.markResumed(sessionKey);
+      return route;
+    }
     await openResumeInTerminal(session, getSettings());
     store.markResumed(sessionKey);
+    return route;
   });
   ipcMain.handle("command:resume-iterm", async (_event, sessionKey: string) => {
     const session = store.getSession(sessionKey);
     if (!session) return;
     await openResumeInSpecificTerminal(session, getSettings(), "iTerm");
     store.markResumed(sessionKey);
-  });
-  ipcMain.handle("command:focus-live-terminal", async (_event, sessionKey: string) => {
-    const session = store.getSession(sessionKey);
-    if (!session) return;
-    const snapshot = await loadLiveSessionSnapshot();
-    if (snapshot.error) throw new Error(`Live session detection failed: ${snapshot.error}`);
-    const pid = liveSessionPidForSession(session, snapshot.sessions);
-    if (!pid) throw new Error("This session is not currently open in a detected terminal.");
-    await focusLiveSessionTerminal(pid);
   });
   ipcMain.handle("command:open-app", async (_event, sessionKey: string) => {
     const session = store.getSession(sessionKey);

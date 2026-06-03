@@ -26,11 +26,16 @@ export function liveSessionPidForSession(session: SessionSearchResult, liveSessi
 
 export async function focusLiveSessionTerminal(pid: number, options: FocusLiveSessionOptions = {}): Promise<void> {
   const platform = options.platform ?? process.platform;
-  if (platform !== "darwin") {
-    throw new Error("Bringing an existing terminal to front is currently supported on macOS only.");
+  const runner = options.runner ?? runProcess;
+  if (platform === "win32") {
+    await runner("powershell.exe", ["-NoProfile", "-Command", buildWindowsFocusScript(pid)]);
+    return;
   }
 
-  const runner = options.runner ?? runProcess;
+  if (platform !== "darwin") {
+    throw new Error("Bringing an existing terminal to front is currently supported on macOS and Windows only.");
+  }
+
   const tty = normalizeTty(await runner("/bin/ps", ["-o", "tty=", "-p", String(pid)]));
   const processOutput = await runner("/bin/ps", ["-axo", "pid=,ppid=,command="]);
   const target = findTerminalTarget(pid, parseProcessRecords(processOutput));
@@ -141,6 +146,38 @@ return "false"`;
 function normalizedExecutableName(token: string | undefined): string {
   if (!token) return "";
   return token.replace(/^['"]|['"]$/g, "").split(/[\\/]/).pop()?.toLowerCase() || "";
+}
+
+function buildWindowsFocusScript(pid: number): string {
+  return `$targetProcessId = ${pid}
+$signature = @"
+using System;
+using System.Runtime.InteropServices;
+public static class WindowFocus {
+  [DllImport("user32.dll")]
+  public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+"@
+Add-Type -TypeDefinition $signature -ErrorAction SilentlyContinue
+$parentsByPid = @{}
+Get-CimInstance Win32_Process | ForEach-Object {
+  if ($_.ProcessId -ne $null -and $_.ParentProcessId -ne $null) {
+    $parentsByPid[[int]$_.ProcessId] = [int]$_.ParentProcessId
+  }
+}
+$visited = @{}
+$currentProcessId = [int]$targetProcessId
+while ($currentProcessId -gt 0 -and -not $visited.ContainsKey($currentProcessId)) {
+  $visited[$currentProcessId] = $true
+  $process = Get-Process -Id $currentProcessId -ErrorAction SilentlyContinue
+  if ($process -and $process.MainWindowHandle -ne 0) {
+    [WindowFocus]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
+    exit 0
+  }
+  if (-not $parentsByPid.ContainsKey($currentProcessId)) { break }
+  $currentProcessId = [int]$parentsByPid[$currentProcessId]
+}
+throw "Could not find a visible terminal window for this open session."`;
 }
 
 function escapeAppleScript(s: string): string {

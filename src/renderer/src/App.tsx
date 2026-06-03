@@ -3,7 +3,6 @@ import type { CSSProperties, MouseEventHandler, ReactElement } from "react";
 import {
   AppWindow,
   Archive,
-  BringToFront,
   ChevronDown,
   ChevronRight,
   Clipboard,
@@ -37,6 +36,7 @@ import {
 import type { IndexStatus } from "../../core/indexer";
 import { formatMessageTime, formatRelativeTime } from "../../core/format-session";
 import type { AppSettings } from "../../core/platform";
+import type { ResumeRouteResult } from "../../core/resume-router";
 import type { InstalledSkill, InstalledSkillsSnapshot, SkillSource } from "../../core/skill-manager";
 import { globalShortcutOptions } from "../../core/shortcuts";
 import { terminalSelectOptions } from "../../core/terminal-options";
@@ -199,6 +199,12 @@ function sourceFilterLabel(item: { label: string; value: SearchOptions["source"]
 
 function localizedLiveStateLabel(state: LiveSessionState, language: LanguageMode): string {
   return localize(language, liveStateLabel(state), state === "open" ? "打开" : state === "closed" ? "关闭" : "未知");
+}
+
+function resumeRouteMessage(result: ResumeRouteResult, language: LanguageMode): string {
+  return result.route === "focus"
+    ? localize(language, "Terminal brought to front.", "终端已前置。")
+    : localize(language, "Resume command sent to terminal.", "Resume 命令已发送到终端。");
 }
 
 type ActionStatus = {
@@ -483,7 +489,7 @@ export function App(): ReactElement {
         if (actionStatus?.kind === "running" || !selectedKey) return;
         const session = displayedResults.find((item) => item.sessionKey === selectedKey);
         if (session) {
-          void runAction(t("Opening terminal", "正在打开终端"), () => window.sessionSearch.resumeSession(session.sessionKey), t("Resume command sent to terminal.", "Resume 命令已发送到终端。"));
+          void runAction(t("Opening terminal", "正在打开终端"), () => window.sessionSearch.resumeSession(session.sessionKey), (result) => resumeRouteMessage(result, language));
         }
         return;
       }
@@ -646,17 +652,18 @@ export function App(): ReactElement {
     }
   }
 
-  async function runAction(label: string, action: () => Promise<void>, successMessage: string): Promise<void> {
+  async function runAction<T>(label: string, action: () => Promise<T>, successMessage: string | ((result: T) => string)): Promise<void> {
     setContextMenu(null);
     setActionStatus({ kind: "running", message: `${label}...` });
     try {
-      await action();
+      const result = await action();
       await refreshAfterAction();
       await refreshLiveSessions();
       window.setTimeout(() => void refreshLiveSessions(), 1200);
-      setActionStatus({ kind: "success", message: successMessage });
+      const message = typeof successMessage === "function" ? successMessage(result) : successMessage;
+      setActionStatus({ kind: "success", message });
       window.setTimeout(() => {
-        setActionStatus((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
+        setActionStatus((current) => (current?.kind === "success" && current.message === message ? null : current));
       }, 1800);
     } catch (error) {
       setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
@@ -1070,13 +1077,10 @@ export function App(): ReactElement {
           onRenameTitle={() => beginRename(detail)}
           onFavorite={() => void toggleFavorite(detail)}
           onResume={() =>
-            void runAction(t("Opening terminal", "正在打开终端"), () => window.sessionSearch.resumeSession(detail.sessionKey), t("Resume command sent to terminal.", "Resume 命令已发送到终端。"))
+            void runAction(t("Opening terminal", "正在打开终端"), () => window.sessionSearch.resumeSession(detail.sessionKey), (result) => resumeRouteMessage(result, language))
           }
           onResumeIterm={() =>
             void runAction(t("Opening iTerm", "正在打开 iTerm"), () => window.sessionSearch.resumeSessionInIterm(detail.sessionKey), t("Resume command sent to iTerm.", "Resume 命令已发送到 iTerm。"))
-          }
-          onFocusTerminal={() =>
-            void runAction(t("Bringing terminal forward", "正在前置终端"), () => window.sessionSearch.focusLiveTerminal(detail.sessionKey), t("Terminal brought to front.", "终端已前置。"))
           }
           onCopyResume={() =>
             void runAction(t("Copying resume command", "正在复制 Resume 命令"), () => window.sessionSearch.copyResumeCommand(detail.sessionKey), t("Resume command copied.", "Resume 命令已复制。"))
@@ -1101,7 +1105,6 @@ export function App(): ReactElement {
       {contextMenu ? (
         <ContextMenu
           state={contextMenu}
-          liveState={getLiveSessionState(contextMenu.session, liveSessionKeys, liveDetectionFailed)}
           language={language}
           revealLabel={FILE_MANAGER_LABEL}
           showMacActions={IS_MAC}
@@ -1125,17 +1128,10 @@ export function App(): ReactElement {
             )
           }
           onResume={() =>
-            void runAction(t("Opening terminal", "正在打开终端"), () => window.sessionSearch.resumeSession(contextMenu.session.sessionKey), t("Resume command sent to terminal.", "Resume 命令已发送到终端。"))
+            void runAction(t("Opening terminal", "正在打开终端"), () => window.sessionSearch.resumeSession(contextMenu.session.sessionKey), (result) => resumeRouteMessage(result, language))
           }
           onResumeIterm={() =>
             void runAction(t("Opening iTerm", "正在打开 iTerm"), () => window.sessionSearch.resumeSessionInIterm(contextMenu.session.sessionKey), t("Resume command sent to iTerm.", "Resume 命令已发送到 iTerm。"))
-          }
-          onFocusTerminal={() =>
-            void runAction(
-              t("Bringing terminal forward", "正在前置终端"),
-              () => window.sessionSearch.focusLiveTerminal(contextMenu.session.sessionKey),
-              t("Terminal brought to front.", "终端已前置。"),
-            )
           }
           onOpenApp={() =>
             void runAction(t("Opening native app", "正在打开原生应用"), () => window.sessionSearch.openNativeApp(contextMenu.session.sessionKey), t("Native app opened.", "原生应用已打开。"))
@@ -1596,7 +1592,6 @@ function DetailPanel({
   onFavorite,
   onResume,
   onResumeIterm,
-  onFocusTerminal,
   onCopyResume,
   onCopyMarkdown,
   onExportMarkdown,
@@ -1621,7 +1616,6 @@ function DetailPanel({
   onFavorite: () => void;
   onResume: () => void;
   onResumeIterm: () => void;
-  onFocusTerminal: () => void;
   onCopyResume: () => void;
   onCopyMarkdown: () => void;
   onExportMarkdown: () => void;
@@ -1721,9 +1715,6 @@ function DetailPanel({
             <TerminalIcon size={15} /> iTerm
           </button>
         ) : null}
-        <button onClick={onFocusTerminal} disabled={actionRunning || liveState !== "open"}>
-          <BringToFront size={15} /> {l("Bring to Front", "前置终端")}
-        </button>
         <button onClick={onRename} disabled={actionRunning}>
           <Clipboard size={15} /> {l("Rename", "重命名")}
         </button>
@@ -1808,7 +1799,6 @@ function ActionToast({ status }: { status: ActionStatus }): ReactElement {
 
 function ContextMenu({
   state,
-  liveState,
   language,
   revealLabel,
   showMacActions,
@@ -1819,7 +1809,6 @@ function ContextMenu({
   onHide,
   onResume,
   onResumeIterm,
-  onFocusTerminal,
   onOpenApp,
   onCopyResume,
   onCopyMarkdown,
@@ -1827,7 +1816,6 @@ function ContextMenu({
   onReveal,
 }: {
   state: ContextMenuState;
-  liveState: LiveSessionState;
   language: LanguageMode;
   revealLabel: string;
   showMacActions: boolean;
@@ -1838,7 +1826,6 @@ function ContextMenu({
   onHide: () => void;
   onResume: () => void;
   onResumeIterm: () => void;
-  onFocusTerminal: () => void;
   onOpenApp: () => void;
   onCopyResume: () => void;
   onCopyMarkdown: () => void;
@@ -1869,11 +1856,6 @@ function ContextMenu({
       {showMacActions ? (
         <button onClick={onResumeIterm}>
           <TerminalIcon size={14} /> Resume in iTerm
-        </button>
-      ) : null}
-      {showMacActions ? (
-        <button onClick={onFocusTerminal} disabled={liveState !== "open"}>
-          <BringToFront size={14} /> Bring to Front
         </button>
       ) : null}
       {showMacActions ? (
