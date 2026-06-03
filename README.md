@@ -51,8 +51,6 @@ Agent-Session-Search 会把两类数据分开处理：
 - Claude / Codex 的原始 session 文件只作为只读输入。
 - 自定义标题、标签、置顶、隐藏状态和搜索索引存放在 Electron `userData` 目录下的本地 SQLite 数据库中。
 
-SQLite 数据库属于运行时状态，不应该提交到 git。
-
 ## 安装使用
 
 要求 macOS 和 Node.js 22.13+（含 npm）。进入仓库目录后，执行下面命令即可安装依赖、构建并注册全局命令：
