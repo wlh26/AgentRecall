@@ -1456,6 +1456,7 @@ function skillSourceUiLabel(source: SkillSource, language: LanguageMode): string
   if (source === "codex-shared") return localize(language, "Shared", "共享");
   if (source === "codex-system") return localize(language, "Codex System", "Codex 系统");
   if (source === "claude-project") return localize(language, "Project", "项目");
+  if (source === "claude-plugin") return localize(language, "Claude Plugin", "Claude 插件");
   return skillSourceLabel(source);
 }
 

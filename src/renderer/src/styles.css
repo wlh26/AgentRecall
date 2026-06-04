@@ -1924,7 +1924,7 @@ select:focus-visible {
   display: flex;
   flex: 0 0 auto;
   gap: 6px;
-  padding: 0 14px 12px;
+  padding: 12px 14px;
   overflow-x: auto;
 }
 
@@ -2060,7 +2060,8 @@ select:focus-visible {
 }
 
 .skill-source-badge.claude-user,
-.skill-source-badge.claude-project {
+.skill-source-badge.claude-project,
+.skill-source-badge.claude-plugin {
   background: var(--claude-badge-bg);
   color: var(--claude-badge-text);
 }
