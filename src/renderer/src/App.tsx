@@ -1320,46 +1320,51 @@ export function App(): ReactElement {
               {RUNTIME_PLATFORM === "darwin" ? "⌘↵" : "Ctrl+Enter"}
             </span>
           </div>
-          {selectedProject ? (
-            <button
-              className="chip clear"
-              onClick={clearProjectFilter}
-              title={selectedProject.path}
-            >
-              {selectedProject.label} ×
-            </button>
-          ) : null}
-          {selectedEnvironment ? (
-            <button className="chip clear" onClick={() => selectEnvironment("all")} title={environmentTarget(selectedEnvironment, language)}>
-              {selectedEnvironment.label} ×
-            </button>
-          ) : null}
-          {tag ? (
-            <button className="chip clear" onClick={() => setTag(undefined)}>
-              #{tag} ×
-            </button>
-          ) : null}
-          <div className="live-filter" role="group" aria-label="Live session status">
-            {LIVE_STATUS_FILTERS.map((option) => (
+          <div className="toolbar-filters">
+            {selectedProject ? (
               <button
-                key={option.value}
-                className={liveStatus === option.value ? "active" : ""}
-                onClick={() => setLiveStatus(option.value)}
+                className="chip clear"
+                onClick={clearProjectFilter}
+                title={selectedProject.path}
               >
-                {liveStatusFilterLabel(option.value, language)}
+                <span>{selectedProject.label}</span>
+                <span aria-hidden="true">×</span>
               </button>
-            ))}
-          </div>
-          <label className="sort-menu">
-            <span>{t("Sort", "排序")}</span>
-            <select value={sortBy} onChange={(event) => setSortBy(event.target.value as SessionSortBy)}>
-              {SORT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {sortLabel(option.value, language)}
-                </option>
+            ) : null}
+            {selectedEnvironment ? (
+              <button className="chip clear" onClick={() => selectEnvironment("all")} title={environmentTarget(selectedEnvironment, language)}>
+                <span>{selectedEnvironment.label}</span>
+                <span aria-hidden="true">×</span>
+              </button>
+            ) : null}
+            {tag ? (
+              <button className="chip clear" onClick={() => setTag(undefined)}>
+                <span>#{tag}</span>
+                <span aria-hidden="true">×</span>
+              </button>
+            ) : null}
+            <div className="live-filter" role="group" aria-label="Live session status">
+              {LIVE_STATUS_FILTERS.map((option) => (
+                <button
+                  key={option.value}
+                  className={liveStatus === option.value ? "active" : ""}
+                  onClick={() => setLiveStatus(option.value)}
+                >
+                  {liveStatusFilterLabel(option.value, language)}
+                </button>
               ))}
-            </select>
-          </label>
+            </div>
+            <label className="sort-menu">
+              <span>{t("Sort", "排序")}</span>
+              <select value={sortBy} onChange={(event) => setSortBy(event.target.value as SessionSortBy)}>
+                {SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {sortLabel(option.value, language)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
           <div className="top-actions">
             <button
               className={`icon-button toolbar-icon-button ${skillsOpen ? "active" : ""}`}

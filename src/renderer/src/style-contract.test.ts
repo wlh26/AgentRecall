@@ -58,6 +58,27 @@ describe("stylesheet theme contract", () => {
     expect(sshBody).toMatch(/overflow-y:\s*auto/);
   });
 
+  it("keeps toolbar action buttons isolated from remote environment filter chips", () => {
+    const toolbar = stylesheet.match(/\.toolbar\s*\{[^}]*\}/)?.[0] ?? "";
+    const toolbarFilters = stylesheet.match(/\.toolbar-filters\s*\{[^}]*\}/)?.[0] ?? "";
+    const searchbox = stylesheet.match(/\.searchbox\s*\{[^}]*\}/)?.[0] ?? "";
+    const clearChip = stylesheet.match(/\.chip\.clear\s*\{[^}]*\}/)?.[0] ?? "";
+    const topActions = stylesheet.match(/\.top-actions\s*\{[^}]*\}/)?.[0] ?? "";
+    const narrowSearchbox = stylesheet.match(/@media \(max-width:\s*1040px\)\s*\{[\s\S]*?\.searchbox\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(toolbar).toMatch(/display:\s*flex/);
+    expect(toolbar).toMatch(/flex-wrap:\s*wrap/);
+    expect(toolbarFilters).toMatch(/flex-wrap:\s*wrap/);
+    expect(toolbarFilters).toMatch(/justify-content:\s*flex-start/);
+    expect(toolbarFilters).toMatch(/max-width:\s*min\(520px,\s*48vw\)/);
+    expect(topActions).toMatch(/margin-left:\s*auto/);
+    expect(searchbox).toMatch(/min-width:\s*0/);
+    expect(searchbox).toMatch(/flex:\s*1\s+1\s+340px/);
+    expect(clearChip).toMatch(/max-width:\s*min\(240px,\s*30vw\)/);
+    expect(clearChip).toMatch(/overflow:\s*hidden/);
+    expect(narrowSearchbox).toMatch(/flex-basis:\s*100%/);
+  });
+
   it("keeps SSH config selection calm without a hard active border or selection shadow", () => {
     const sshConfigRow = stylesheet.match(/\.ssh-config-row\s*\{[^}]*\}/)?.[0] ?? "";
     const activeRow = stylesheet.match(/\.ssh-config-row\.active\s*\{[^}]*\}/)?.[0] ?? "";

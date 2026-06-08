@@ -1007,6 +1007,18 @@ select:focus-visible {
 
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  gap: 8px;
+}
+
+.toolbar-filters {
+  display: flex;
+  min-width: 0;
+  max-width: min(520px, 48vw);
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-start;
   align-items: center;
   gap: 8px;
 }
@@ -1016,6 +1028,7 @@ select:focus-visible {
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .toolbar-icon-button {
@@ -1035,7 +1048,8 @@ select:focus-visible {
   align-items: center;
   gap: 11px;
   height: 38px;
-  flex: 1;
+  min-width: 0;
+  flex: 1 1 340px;
   padding: 0 11px;
   border: 1px solid var(--border);
   border-radius: 9px;
@@ -1184,8 +1198,18 @@ select:focus-visible {
 
 .chip.clear {
   height: 30px;
+  max-width: min(240px, 30vw);
+  min-width: 0;
+  overflow: hidden;
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+.chip.clear span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .result-count {
@@ -1210,6 +1234,20 @@ select:focus-visible {
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 1040px) {
+  .toolbar {
+    align-items: start;
+  }
+
+  .searchbox {
+    flex-basis: 100%;
+  }
+
+  .toolbar-filters {
+    justify-content: flex-start;
+  }
 }
 
 .results {
@@ -3424,12 +3462,16 @@ select:focus-visible {
   }
 
   .toolbar {
-    align-items: stretch;
-    flex-wrap: wrap;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
   }
 
   .searchbox {
-    min-width: 100%;
+    grid-column: 1 / -1;
+  }
+
+  .toolbar-filters {
+    justify-content: flex-start;
   }
 
   .detail {
