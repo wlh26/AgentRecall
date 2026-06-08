@@ -108,7 +108,7 @@ describe("skill usage", () => {
         timestamp: "2026-06-04T10:00:00.000Z",
         payload: {
           type: "function_call_output",
-          output: "/Users/me/.codex/skills/ignored/SKILL.md",
+          output: "/tmp/session-search-fixtures/.codex/skills/ignored/SKILL.md",
         },
       }),
     ]);
@@ -141,7 +141,7 @@ describe("skill usage", () => {
         payload: {
           type: "function_call",
           name: "shell_command",
-          arguments: JSON.stringify({ command: "cat /Users/me/.codex/skills/brainstorming/SKILL.md" }),
+          arguments: JSON.stringify({ command: "cat /tmp/session-search-fixtures/.codex/skills/brainstorming/SKILL.md" }),
         },
       }),
       JSON.stringify({
@@ -150,7 +150,7 @@ describe("skill usage", () => {
         payload: {
           type: "function_call",
           name: "shell_command",
-          arguments: JSON.stringify({ command: "cat /Users/me/.codex/skills/brainstorming/SKILL.md" }),
+          arguments: JSON.stringify({ command: "cat /tmp/session-search-fixtures/.codex/skills/brainstorming/SKILL.md" }),
         },
       }),
     ]);

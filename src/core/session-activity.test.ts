@@ -9,7 +9,7 @@ describe("live session detection", () => {
         '124 /opt/homebrew/bin/codex resume "codex two"',
         "125 /opt/homebrew/bin/claude --resume claude-1",
         "126 /opt/homebrew/bin/claude --resume=claude-2",
-        "127 /Users/xjx/.codebuddy/bin/codebuddy --resume codebuddy-1",
+        "127 /tmp/session-search-fixtures/.codebuddy/bin/codebuddy --resume codebuddy-1",
         "128 rg codex resume ignored",
       ]),
     ).toEqual([
@@ -32,7 +32,7 @@ describe("live session detection", () => {
         new Map([
           [
             224,
-            "/Users/me/.codex/sessions/2026/06/01/rollout-2026-06-01T19-11-30-019e82e1-b60d-7b12-95c3-d33e1d05f0a9.jsonl",
+            "/tmp/session-search-fixtures/.codex/sessions/2026/06/01/rollout-2026-06-01T19-11-30-019e82e1-b60d-7b12-95c3-d33e1d05f0a9.jsonl",
           ],
         ]),
       ),
