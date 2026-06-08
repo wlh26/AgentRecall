@@ -85,6 +85,7 @@ import { ApiConfigDialog } from "./components/api-config-dialog";
 import { DetailPanel } from "./components/detail-panel";
 import { CommandDialog, DeleteSessionDialog, DeleteTagDialog } from "./components/session-dialogs";
 import { SkillsDialog } from "./components/skills-dialog";
+import { useClampedContextMenuStyle } from "./context-menu-position";
 import {
   SOURCE_LABEL,
   isBranchTag,
@@ -1646,8 +1647,9 @@ function ContextMenu({
   onReveal: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
+  const menu = useClampedContextMenuStyle(state);
   return (
-    <div className="context-menu" style={{ left: state.x, top: state.y }} onClick={(event) => event.stopPropagation()}>
+    <div ref={menu.ref} className="context-menu" style={menu.style} onClick={(event) => event.stopPropagation()}>
       <button onClick={onRename}>
         <Clipboard size={14} /> {l("Rename", "重命名")}
       </button>

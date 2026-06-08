@@ -6,6 +6,7 @@ import { formatCompactNumber } from "../format-count";
 import { localize, type LanguageMode } from "../language";
 import { filterInstalledSkills, sortInstalledSkills, skillSourceLabel, type SkillSortKey, type SkillSourceFilter } from "../skill-manager";
 import type { SkillsFeedback } from "../app-types";
+import { useClampedContextMenuStyle } from "../context-menu-position";
 
 export function SkillsDialog({
   snapshot,
@@ -292,10 +293,12 @@ function SkillContextMenu({
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const canDelete = state.skill.source !== "codex-system";
+  const menu = useClampedContextMenuStyle(state);
   return (
     <div
+      ref={menu.ref}
       className="context-menu skill-context-menu"
-      style={{ left: state.x, top: state.y }}
+      style={menu.style}
       onClick={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
     >
