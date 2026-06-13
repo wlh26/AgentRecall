@@ -1,11 +1,12 @@
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
 import { homedir } from "node:os";
 import path from "node:path";
 import tls from "node:tls";
+import { fileURLToPath } from "node:url";
 import type { UsageQuota, UsageQuotaCard, UsageQuotaSnapshot } from "./types";
 
 const CODEX_USAGE_PRIMARY_URL = "https://chatgpt.com/backend-api/wham/usage";
@@ -15,6 +16,8 @@ const HTTP_BODY_LIMIT = 64 * 1024;
 const QUOTA_FIVE_HOUR = "five_hour";
 const QUOTA_SEVEN_DAY = "seven_day";
 const QUOTA_CODE_REVIEW = "code_review";
+const CLAUDE_STATUSLINE_SCRIPT_BASENAME = "claude-statusline-snapshot.cjs";
+const CLAUDE_STATUSLINE_BIN_NAME = "agent-session-search-claude-statusline";
 
 interface QuotaLoadOptions {
   now?: Date;
@@ -170,8 +173,19 @@ export async function loadCodexQuotaCard(options: UsageQuotaLoadOptions = {}): P
 export function loadClaudeQuotaCard(options: QuotaLoadOptions = {}): UsageQuotaCard {
   const now = options.now ?? new Date();
   const card = baseQuotaCard("claude-code", "Claude Code", "Install a Claude Code statusline bridge that writes ~/.claude/statusline-snapshot.json.");
+  const bridgeStatus = ensureClaudeStatuslineBridge(options);
   const statuslinePath = firstExistingFile(claudeStatuslineCandidates(options));
-  if (!statuslinePath) return card;
+  if (!statuslinePath) {
+    return {
+      ...card,
+      detail:
+        bridgeStatus === "installed"
+          ? "Claude Code statusline bridge installed. Restart Claude Code, then run one request to generate quota data."
+          : bridgeStatus === "conflict"
+            ? "Claude Code has a different statusLine configured, so Agent-Session-Search cannot generate quota data automatically."
+            : card.detail,
+    };
+  }
 
   let raw: ClaudeStatuslineFile;
   try {
@@ -202,6 +216,79 @@ export function loadClaudeQuotaCard(options: QuotaLoadOptions = {}): UsageQuotaC
       : "Claude statusline file has no quota data.";
   }
   return next;
+}
+
+type ClaudeStatuslineBridgeStatus = "installed" | "already" | "conflict" | "error" | "skipped";
+
+function ensureClaudeStatuslineBridge(options: QuotaLoadOptions): ClaudeStatuslineBridgeStatus {
+  const home = getHomeDir(options);
+  if (!home) return "skipped";
+  const settingsPath = path.join(home, ".claude", "settings.json");
+  const command = buildClaudeStatuslineCommand();
+
+  let settings: Record<string, unknown> = {};
+  if (existsSync(settingsPath)) {
+    try {
+      const raw = readFileSync(settingsPath, "utf8");
+      if (raw.trim()) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (!isPlainObject(parsed)) return "error";
+        settings = parsed;
+      }
+    } catch {
+      return "error";
+    }
+  }
+
+  const existing = settings.statusLine;
+  if (existing !== undefined && existing !== null) {
+    const existingCommand = isPlainObject(existing) && typeof existing.command === "string" ? existing.command : "";
+    if (!isOurClaudeStatuslineCommand(existingCommand)) return "conflict";
+    if (existingCommand === command) return "already";
+  }
+
+  settings.statusLine = { type: "command", command };
+  try {
+    mkdirSync(path.dirname(settingsPath), { recursive: true });
+    writeJsonAtomic(settingsPath, settings);
+    return "installed";
+  } catch {
+    return "error";
+  }
+}
+
+function buildClaudeStatuslineCommand(): string {
+  const scriptPath = localClaudeStatuslineScriptPath();
+  if (scriptPath) {
+    return process.platform === "win32" ? `node "${scriptPath}"` : `"${scriptPath}"`;
+  }
+  return process.platform === "win32" ? `${CLAUDE_STATUSLINE_BIN_NAME}.cmd` : CLAUDE_STATUSLINE_BIN_NAME;
+}
+
+function localClaudeStatuslineScriptPath(): string | null {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve(moduleDir, "../../bin", CLAUDE_STATUSLINE_SCRIPT_BASENAME),
+    path.resolve(process.cwd(), "bin", CLAUDE_STATUSLINE_SCRIPT_BASENAME),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function isOurClaudeStatuslineCommand(command: string): boolean {
+  return command.includes(CLAUDE_STATUSLINE_SCRIPT_BASENAME) || command.includes(CLAUDE_STATUSLINE_BIN_NAME);
+}
+
+function writeJsonAtomic(filePath: string, value: unknown): void {
+  const tmpPath = `${filePath}.${process.pid}.tmp`;
+  writeFileSync(tmpPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  renameSync(tmpPath, filePath);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Object.prototype.toString.call(value) === "[object Object]";
 }
 
 function baseQuotaCard(provider: UsageQuotaCard["provider"], displayName: string, detail: string): UsageQuotaCard {

@@ -6,7 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const settingsPath = path.join(homeDir(), ".claude", "settings.json");
-const command = process.platform === "win32" ? "agent-session-search-claude-statusline.cmd" : "agent-session-search-claude-statusline";
+const command = statuslineCommand();
 
 try {
   const settings = readSettings(settingsPath);
@@ -34,6 +34,14 @@ function readSettings(filePath) {
 
 function homeDir() {
   return process.env.AGENT_SESSION_SEARCH_TEST_HOME || os.homedir();
+}
+
+function statuslineCommand() {
+  const localScript = path.join(__dirname, "claude-statusline-snapshot.cjs");
+  if (fs.existsSync(localScript)) {
+    return process.platform === "win32" ? `node "${localScript}"` : `"${localScript}"`;
+  }
+  return process.platform === "win32" ? "agent-session-search-claude-statusline.cmd" : "agent-session-search-claude-statusline";
 }
 
 function writeJsonAtomic(filePath, value) {

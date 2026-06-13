@@ -28,12 +28,9 @@ describe("Claude statusline setup", () => {
         theme: "dark",
         statusLine: {
           type: "command",
-          command:
-            process.platform === "win32"
-              ? "agent-session-search-claude-statusline.cmd"
-              : "agent-session-search-claude-statusline",
         },
       });
+      expect((settings.statusLine as { command?: string }).command).toContain("claude-statusline-snapshot.cjs");
     } finally {
       rmSync(homeDir, { recursive: true, force: true });
     }

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -110,6 +110,74 @@ describe("usage quota loader", () => {
         expect.objectContaining({ key: "five_hour", label: "5h", usedPercent: 10, remainingPercent: 90 }),
         expect.objectContaining({ key: "seven_day", label: "7d", usedPercent: 45, remainingPercent: 55 }),
       ]);
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("repairs a missing Claude Code statusLine when loading a stale local snapshot", () => {
+    const homeDir = makeHome();
+    try {
+      writeJson(path.join(homeDir, ".claude", "settings.json"), { env: {} });
+      writeJson(path.join(homeDir, ".claude", "statusline-snapshot.json"), {
+        source: "agent-session-search-statusline",
+        updated_at: "2026-05-31T12:00:00.000Z",
+        rate_limits: {
+          five_hour: { used_percentage: 10, resets_at: 1_807_000_000 },
+        },
+      });
+
+      const card = loadClaudeQuotaCard({ now: NOW, homeDir, env: {} });
+
+      expect(card.status).toBe("supported");
+      const settings = JSON.parse(readFileSync(path.join(homeDir, ".claude", "settings.json"), "utf8")) as {
+        statusLine?: { command?: string };
+      };
+      expect(settings.statusLine?.command).toContain("claude-statusline-snapshot.cjs");
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("repairs an existing Claude Code statusLine that points at an unavailable global bin", () => {
+    const homeDir = makeHome();
+    try {
+      writeJson(path.join(homeDir, ".claude", "settings.json"), {
+        statusLine: { type: "command", command: "agent-session-search-claude-statusline" },
+      });
+      writeJson(path.join(homeDir, ".claude", "statusline-snapshot.json"), {
+        source: "agent-session-search-statusline",
+        updated_at: "2026-05-31T12:00:00.000Z",
+        rate_limits: {
+          five_hour: { used_percentage: 10, resets_at: 1_807_000_000 },
+        },
+      });
+
+      const card = loadClaudeQuotaCard({ now: NOW, homeDir, env: { PATH: "/usr/bin:/bin" } });
+
+      expect(card.status).toBe("supported");
+      const settings = JSON.parse(readFileSync(path.join(homeDir, ".claude", "settings.json"), "utf8")) as {
+        statusLine?: { command?: string };
+      };
+      expect(settings.statusLine?.command).toContain("claude-statusline-snapshot.cjs");
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("installs the Claude Code statusLine when no quota snapshot exists yet", () => {
+    const homeDir = makeHome();
+    try {
+      writeJson(path.join(homeDir, ".claude", "settings.json"), { env: {} });
+
+      const card = loadClaudeQuotaCard({ now: NOW, homeDir, env: {} });
+
+      expect(card.status).toBe("not_configured");
+      expect(card.detail).toContain("Restart Claude Code");
+      const settings = JSON.parse(readFileSync(path.join(homeDir, ".claude", "settings.json"), "utf8")) as {
+        statusLine?: { command?: string };
+      };
+      expect(settings.statusLine?.command).toContain("claude-statusline-snapshot.cjs");
     } finally {
       rmSync(homeDir, { recursive: true, force: true });
     }
