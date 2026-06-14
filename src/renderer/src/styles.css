@@ -1456,11 +1456,6 @@ select:focus-visible {
   color: var(--success-text);
 }
 
-.live-status.unknown {
-  background: var(--running-bg);
-  color: var(--running-text);
-}
-
 .live-status-dot {
   width: 6px;
   height: 6px;

@@ -72,7 +72,7 @@ export function sourceFilterLabel(item: { label: string; value: SearchOptions["s
 }
 
 export function localizedLiveStateLabel(state: LiveSessionState, language: LanguageMode): string {
-  return localize(language, liveStateLabel(state), state === "open" ? "打开" : state === "closed" ? "关闭" : "未知");
+  return localize(language, liveStateLabel(state), state === "open" ? "打开" : "关闭");
 }
 
 export function resumeRouteMessage(result: ResumeRouteResult, language: LanguageMode): string {

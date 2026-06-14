@@ -31,14 +31,15 @@ describe("live session filtering", () => {
     ]);
   });
 
-  it("treats sessions as unknown when live detection fails", () => {
-    expect(getLiveSessionState(codex, new Set(["codex:codex-1"]), true)).toBe("unknown");
+  it("treats sessions as closed when live detection fails", () => {
+    expect(getLiveSessionState(codex, new Set(["codex:codex-1"]), true)).toBe("closed");
     expect(filterSessionsByLiveStatus([codex], new Set(["codex:codex-1"]), "open", true)).toEqual([]);
+    expect(filterSessionsByLiveStatus([codex], new Set(["codex:codex-1"]), "closed", true)).toEqual([codex]);
   });
 
-  it("does not classify unsupported sources as CodeBuddy live sessions", () => {
-    expect(getLiveSessionState(opencode, new Set(["codebuddy:codebuddy-1"]), false)).toBe("unknown");
+  it("treats unsupported sources as closed", () => {
+    expect(getLiveSessionState(opencode, new Set(["codebuddy:codebuddy-1"]), false)).toBe("closed");
     expect(filterSessionsByLiveStatus([opencode], new Set(["codebuddy:codebuddy-1"]), "open", false)).toEqual([]);
-    expect(filterSessionsByLiveStatus([opencode], new Set(["codebuddy:codebuddy-1"]), "closed", false)).toEqual([]);
+    expect(filterSessionsByLiveStatus([opencode], new Set(["codebuddy:codebuddy-1"]), "closed", false)).toEqual([opencode]);
   });
 });

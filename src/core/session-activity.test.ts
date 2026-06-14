@@ -46,6 +46,23 @@ describe("live session detection", () => {
     ).toEqual([{ family: "codex", rawId: "019e82e1-b60d-7b12-95c3-d33e1d05f0a9", pid: 224 }]);
   });
 
+  it("maps a plain running Claude process through its open session file", () => {
+    expect(
+      detectLiveSessionsFromProcessLines(
+        [
+          "323 node /opt/homebrew/bin/claude",
+          "324 /opt/homebrew/bin/claude",
+          "325 /opt/homebrew/bin/claude --resume claude-resumed",
+        ],
+        new Map(),
+        new Map([[324, "/tmp/session-search-fixtures/.claude/projects/-work-app/claude-live-1.jsonl"]]),
+      ),
+    ).toEqual([
+      { family: "claude", rawId: "claude-live-1", pid: 324 },
+      { family: "claude", rawId: "claude-resumed", pid: 325 },
+    ]);
+  });
+
   it("maps a running Trae app process through its workspace state database", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-trae-live-"));
     const dbPath = path.join(root, "User", "workspaceStorage", "abc", "state.vscdb");

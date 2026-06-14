@@ -1,6 +1,6 @@
 import type { SessionSource } from "../../core/types";
 
-export type LiveSessionState = "open" | "closed" | "unknown";
+export type LiveSessionState = "open" | "closed";
 export type LiveStatusFilter = "all" | "open" | "closed";
 
 export interface LiveFilterableSession {
@@ -23,9 +23,9 @@ export function liveSessionKeyForSession(session: LiveFilterableSession): string
 }
 
 export function getLiveSessionState(session: LiveFilterableSession, liveSessionKeys: Set<string>, liveDetectionFailed: boolean): LiveSessionState {
-  if (liveDetectionFailed) return "unknown";
+  if (liveDetectionFailed) return "closed";
   const liveKey = liveSessionKeyForSession(session);
-  if (!liveKey) return "unknown";
+  if (!liveKey) return "closed";
   return liveSessionKeys.has(liveKey) ? "open" : "closed";
 }
 
@@ -40,7 +40,5 @@ export function filterSessionsByLiveStatus<T extends LiveFilterableSession>(
 }
 
 export function liveStateLabel(state: LiveSessionState): string {
-  if (state === "open") return "Open";
-  if (state === "closed") return "Closed";
-  return "Unknown";
+  return state === "open" ? "Open" : "Closed";
 }

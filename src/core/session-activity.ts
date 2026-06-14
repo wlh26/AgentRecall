@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
+import * as path from "node:path";
 import type { LiveSession, LiveSessionFamily, LiveSessionSnapshot } from "./types";
 
 const require = createRequire(import.meta.url);
@@ -22,6 +23,7 @@ export interface LoadLiveSessionOptions {
 export function detectLiveSessionsFromProcessLines(
   lines: string[],
   codexSessionFilesByPid: Map<number, string> = new Map(),
+  claudeSessionFilesByPid: Map<number, string> = new Map(),
   traeSessionIdsByPid: Map<number, string> = new Map(),
 ): LiveSession[] {
   const sessions: LiveSession[] = [];
@@ -35,6 +37,7 @@ export function detectLiveSessionsFromProcessLines(
     const command =
       detectResumeCommand(tokens) ??
       detectPlainCodexCommand(tokens, codexSessionFilesByPid.get(entry.pid)) ??
+      detectPlainClaudeCommand(tokens, claudeSessionFilesByPid.get(entry.pid)) ??
       detectTraeAppSession(entry.command, traeSessionIdsByPid.get(entry.pid));
     if (!command) continue;
 
@@ -62,13 +65,16 @@ export async function loadLiveSessionSnapshot(options: LoadLiveSessionOptions = 
           ])
         : await runner("/bin/ps", ["-axo", "pid=,command="]);
     const lines = output.split(/\r?\n/);
-    const codexSessionFilesByPid = platform === "win32" ? new Map<number, string>() : await loadPlainCodexSessionFiles(lines, runner);
+    const [codexSessionFilesByPid, claudeSessionFilesByPid] =
+      platform === "win32"
+        ? [new Map<number, string>(), new Map<number, string>()]
+        : await Promise.all([loadPlainCodexSessionFiles(lines, runner), loadPlainClaudeSessionFiles(lines, runner)]);
     const traeSessionIdsByPid =
       platform === "win32" || options.includeTrae === false ? new Map<number, string>() : await loadTraeSessionIds(lines, runner);
 
     return {
       generatedAt,
-      sessions: detectLiveSessionsFromProcessLines(lines, codexSessionFilesByPid, traeSessionIdsByPid),
+      sessions: detectLiveSessionsFromProcessLines(lines, codexSessionFilesByPid, claudeSessionFilesByPid, traeSessionIdsByPid),
     };
   } catch (error) {
     return {
@@ -91,6 +97,28 @@ async function loadPlainCodexSessionFiles(lines: string[], runner: ProcessListRu
       try {
         const output = await runner("lsof", ["-p", String(pid)]);
         const sessionFile = extractCodexSessionFile(output);
+        if (sessionFile) sessionFiles.set(pid, sessionFile);
+      } catch {
+        // A process can exit between ps and lsof; ignore it and keep the rest.
+      }
+    }),
+  );
+
+  return sessionFiles;
+}
+
+async function loadPlainClaudeSessionFiles(lines: string[], runner: ProcessListRunner): Promise<Map<number, string>> {
+  const sessionFiles = new Map<number, string>();
+  const entries = lines.map(parseProcessLine).filter((entry): entry is ProcessEntry => Boolean(entry));
+  const pids = entries
+    .filter((entry) => isPlainClaudeCommand(splitCommandLine(entry.command)))
+    .map((entry) => entry.pid);
+
+  await Promise.all(
+    pids.map(async (pid) => {
+      try {
+        const output = await runner("lsof", ["-p", String(pid)]);
+        const sessionFile = extractClaudeSessionFile(output);
         if (sessionFile) sessionFiles.set(pid, sessionFile);
       } catch {
         // A process can exit between ps and lsof; ignore it and keep the rest.
@@ -155,6 +183,12 @@ function detectPlainCodexCommand(tokens: string[], sessionFile: string | undefin
   return rawId ? { family: "codex", rawId } : null;
 }
 
+function detectPlainClaudeCommand(tokens: string[], sessionFile: string | undefined): { family: LiveSessionFamily; rawId: string } | null {
+  if (!sessionFile || !isPlainClaudeCommand(tokens)) return null;
+  const rawId = extractClaudeSessionId(sessionFile);
+  return rawId ? { family: "claude", rawId } : null;
+}
+
 function detectTraeAppSession(command: string, rawId: string | undefined): { family: LiveSessionFamily; rawId: string } | null {
   if (!rawId || !isTraeAppCommand(command)) return null;
   return { family: "trae", rawId };
@@ -169,6 +203,20 @@ function isPlainCodexCommand(tokens: string[]): boolean {
     const args = tokens.slice(index + 1);
     if (args.includes("resume")) return false;
     if (args[0] === "app-server") return false;
+    return true;
+  }
+
+  return false;
+}
+
+function isPlainClaudeCommand(tokens: string[]): boolean {
+  const commandStartIndexes = isNodeExecutable(tokens[0]) ? [1] : [0];
+
+  for (const index of commandStartIndexes) {
+    const family = executableFamily(tokens[index]);
+    if (family !== "claude") continue;
+    const args = tokens.slice(index + 1);
+    if (flagResumeId(args)) return false;
     return true;
   }
 
@@ -241,6 +289,19 @@ function extractCodexSessionFile(lsofOutput: string): string | null {
 
 function extractCodexSessionId(sessionFile: string): string | null {
   return sessionFile.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/)?.[1] ?? null;
+}
+
+function extractClaudeSessionFile(lsofOutput: string): string | null {
+  for (const line of lsofOutput.split(/\r?\n/)) {
+    const match = line.match(/(\S*\.claude\/projects\/\S+?\.jsonl)\b/);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+function extractClaudeSessionId(sessionFile: string): string | null {
+  const rawId = path.basename(sessionFile, ".jsonl").trim();
+  return rawId || null;
 }
 
 function extractTraeStateDbPath(lsofOutput: string): string | null {
