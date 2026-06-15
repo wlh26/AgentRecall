@@ -43,4 +43,38 @@ describe("Claude statusline snapshot bridge", () => {
       rmSync(outputPath, { force: true });
     }
   });
+
+  it("carries forward the last known quota when a render omits rate_limits", () => {
+    const outputPath = path.join(tmpdir(), `claude-statusline-${process.pid}-${Date.now()}-carry.json`);
+    const run = (input: unknown): void => {
+      execFileSync(process.execPath, [SCRIPT_PATH], {
+        input: JSON.stringify(input),
+        env: { ...process.env, AGENT_SESSION_SEARCH_CLAUDE_STATUSLINE: outputPath },
+        encoding: "utf8",
+      });
+    };
+    try {
+      // First render carries quota data.
+      run({
+        plan: "max",
+        rate_limits: {
+          five_hour: { used_percentage: 6, resets_at: 1_807_000_000 },
+          seven_day: { used_percentage: 4, resets_at: 1_807_400_000 },
+        },
+      });
+      // A later render omits rate_limits/plan entirely (Claude Code does this intermittently).
+      run({ session_id: "s", model: { id: "opus" } });
+
+      const snapshot = JSON.parse(readFileSync(outputPath, "utf8")) as Record<string, unknown>;
+      expect(snapshot).toMatchObject({
+        plan: "max",
+        rate_limits: {
+          five_hour: { used_percentage: 6, resets_at: 1_807_000_000 },
+          seven_day: { used_percentage: 4, resets_at: 1_807_400_000 },
+        },
+      });
+    } finally {
+      rmSync(outputPath, { force: true });
+    }
+  });
 });

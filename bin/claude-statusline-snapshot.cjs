@@ -21,7 +21,7 @@ process.stdin.on("data", (chunk) => {
 process.stdin.on("end", () => {
   try {
     const input = stdin.trim() ? JSON.parse(stdin) : {};
-    const snapshot = buildSnapshot(input);
+    const snapshot = buildSnapshot(input, readExistingSnapshot());
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     writeJsonAtomic(outputPath, snapshot);
     process.stdout.write(formatStatusline(snapshot));
@@ -32,27 +32,41 @@ process.stdin.on("end", () => {
   }
 });
 
-function buildSnapshot(input) {
+function buildSnapshot(input, previous) {
   const snapshot = {
     source: "agent-session-search-statusline",
     updated_at: new Date().toISOString(),
   };
 
-  const plan = stringField(input, "plan") || stringField(input, "subscription_plan");
+  // Claude Code does not include `plan`/`rate_limits` on every statusLine render (early renders and
+  // some refreshes omit them). Carry the last known values forward so a payload without quota data
+  // does not blank out the panel; quota.ts marks them stale once resets_at passes.
+  const plan = stringField(input, "plan") || stringField(input, "subscription_plan") || stringField(previous, "plan");
   if (plan) snapshot.plan = plan;
 
   const rateLimits = objectField(input, "rate_limits");
-  if (rateLimits) {
-    const fiveHour = normalizeWindow(objectField(rateLimits, "five_hour"));
-    const sevenDay = normalizeWindow(objectField(rateLimits, "seven_day"));
-    if (fiveHour || sevenDay) {
-      snapshot.rate_limits = {};
-      if (fiveHour) snapshot.rate_limits.five_hour = fiveHour;
-      if (sevenDay) snapshot.rate_limits.seven_day = sevenDay;
-    }
+  const fiveHour = normalizeWindow(objectField(rateLimits, "five_hour"));
+  const sevenDay = normalizeWindow(objectField(rateLimits, "seven_day"));
+  const prevRateLimits = objectField(previous, "rate_limits");
+  const five = fiveHour || normalizeWindow(objectField(prevRateLimits, "five_hour"));
+  const seven = sevenDay || normalizeWindow(objectField(prevRateLimits, "seven_day"));
+  if (five || seven) {
+    snapshot.rate_limits = {};
+    if (five) snapshot.rate_limits.five_hour = five;
+    if (seven) snapshot.rate_limits.seven_day = seven;
   }
 
   return snapshot;
+}
+
+function readExistingSnapshot() {
+  try {
+    const raw = fs.readFileSync(outputPath, "utf8");
+    const parsed = raw.trim() ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeWindow(value) {
