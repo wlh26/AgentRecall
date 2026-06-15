@@ -141,6 +141,17 @@ function run(remove) {
     messages.push("Skipped Codex (~/.codex not found).");
   }
 
+  // CodeBuddy uses ~/.codebuddy/mcp.json with the same { mcpServers } shape as Claude.
+  const codeBuddyDir = path.join(home, ".codebuddy");
+  if (fs.existsSync(codeBuddyDir)) {
+    const codeBuddyPath = path.join(codeBuddyDir, "mcp.json");
+    const codeBuddyConfig = applyClaudeConfig(readJson(codeBuddyPath), scriptPath, remove, command);
+    writeFileAtomic(codeBuddyPath, `${JSON.stringify(codeBuddyConfig, null, 2)}\n`);
+    messages.push(`${remove ? "Removed" : "Configured"} MCP server in ${codeBuddyPath}`);
+  } else {
+    messages.push("Skipped CodeBuddy (~/.codebuddy not found).");
+  }
+
   if (!remove) messages.push(`Using node: ${command}`);
   return messages;
 }

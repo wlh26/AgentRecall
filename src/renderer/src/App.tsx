@@ -2583,7 +2583,7 @@ function SettingsDialog({
                     <span className="settings-field-sub">
                       {mcpEnabled === null
                         ? l("Checking...", "检查中...")
-                        : l("Registers in ~/.claude.json and ~/.codex/config.toml.", "注册到 ~/.claude.json 和 ~/.codex/config.toml。")}
+                        : l("Registers in Claude Code, Codex, and CodeBuddy configs.", "注册到 Claude Code、Codex、CodeBuddy 的配置中。")}
                     </span>
                   </div>
                   <input
