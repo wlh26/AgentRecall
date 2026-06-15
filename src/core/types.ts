@@ -117,6 +117,8 @@ export interface SearchOptions {
   projectPath?: string;
   environmentId?: string | "all";
   source?: SessionSourceFilter;
+  liveStatus?: "open" | "closed";
+  liveSessionKeys?: string[];
   visibility?: "default" | "favorites" | "hidden" | "pinned";
   sortBy?: SessionSortBy;
   limit?: number;

@@ -343,9 +343,15 @@ export function App(): ReactElement {
   const searchRef = useRef<HTMLInputElement>(null);
   const t = useCallback((en: string, zh: string) => localize(language, en, zh), [language]);
   const searchScopeKey = useMemo(
-    () => JSON.stringify([query, source, environmentId, tag ?? "", projectPath ?? "", projectEnvironmentId ?? "", visibility, sortBy]),
-    [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, sortBy],
+    () => JSON.stringify([query, source, environmentId, tag ?? "", projectPath ?? "", projectEnvironmentId ?? "", visibility, sortBy, liveStatus]),
+    [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, sortBy, liveStatus],
   );
+  const liveSessionKeys = useMemo(
+    () => new Set(liveSessions.sessions.map((session) => `${session.family}:${session.rawId}`)),
+    [liveSessions],
+  );
+  const liveDetectionFailed = Boolean(liveSessions.error);
+  const liveSearchKeys = useMemo(() => [...liveSessionKeys], [liveSessionKeys]);
 
   const load = useCallback(async () => {
     const requestId = ++loadSeqRef.current;
@@ -359,6 +365,8 @@ export function App(): ReactElement {
       visibility,
       sortBy,
       limit: sessionLimit,
+      liveStatus: liveStatus === "all" ? undefined : liveStatus,
+      liveSessionKeys: liveStatus === "all" || liveDetectionFailed ? [] : liveSearchKeys,
     };
     const page = searchScope.projectEnvironmentConflict
       ? { sessions: [], totalCount: 0, hasMore: false }
@@ -370,7 +378,7 @@ export function App(): ReactElement {
     setSelectedKey((current) =>
       current && !page.sessions.some((session) => session.sessionKey === current) ? null : current,
     );
-  }, [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, sortBy, sessionLimit]);
+  }, [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, sortBy, sessionLimit, liveStatus, liveDetectionFailed, liveSearchKeys]);
 
   const loadSidebarMetadata = useCallback(async () => {
     const requestId = ++metadataLoadSeqRef.current;
@@ -613,11 +621,6 @@ export function App(): ReactElement {
     };
   }, [load, loadSidebarMetadata, loadStats]);
 
-  const liveSessionKeys = useMemo(
-    () => new Set(liveSessions.sessions.map((session) => `${session.family}:${session.rawId}`)),
-    [liveSessions],
-  );
-  const liveDetectionFailed = Boolean(liveSessions.error);
   const displayedResults = useMemo(
     () => filterSessionsByLiveStatus(results, liveSessionKeys, liveStatus, liveDetectionFailed),
     [results, liveSessionKeys, liveStatus, liveDetectionFailed],

@@ -36,6 +36,16 @@ const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: typeof Databa
 type Db = DatabaseSyncType;
 type ApiProviderKeyTarget = "codex" | "claude";
 
+const LIVE_SESSION_KEY_SQL = `
+  CASE
+    WHEN source IN ('claude-cli', 'claude-app', 'claude-internal') THEN 'claude:' || raw_id
+    WHEN source IN ('codex-cli', 'codex-app', 'codex-internal') THEN 'codex:' || raw_id
+    WHEN source = 'codebuddy-cli' THEN 'codebuddy:' || raw_id
+    WHEN source = 'trae' THEN 'trae:' || raw_id
+    ELSE NULL
+  END
+`;
+
 interface StatsRange {
   period: SessionStatsPeriod;
   since: number | null;
@@ -1339,6 +1349,21 @@ export class SessionStore {
       } else {
         where.push("source = ?");
         args.push(options.source);
+      }
+    }
+
+    if (options.liveStatus) {
+      const liveSessionKeys = [...new Set(options.liveSessionKeys ?? [])].filter(Boolean);
+      if (options.liveStatus === "open") {
+        if (liveSessionKeys.length === 0) {
+          where.push("0 = 1");
+        } else {
+          where.push(`${LIVE_SESSION_KEY_SQL} IN (${liveSessionKeys.map(() => "?").join(", ")})`);
+          args.push(...liveSessionKeys);
+        }
+      } else if (liveSessionKeys.length > 0) {
+        where.push(`(${LIVE_SESSION_KEY_SQL} IS NULL OR ${LIVE_SESSION_KEY_SQL} NOT IN (${liveSessionKeys.map(() => "?").join(", ")}))`);
+        args.push(...liveSessionKeys);
       }
     }
 

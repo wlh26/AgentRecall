@@ -6,7 +6,7 @@ import * as path from "node:path";
 import { createInMemoryStore, SessionStore } from "./session-store";
 import { TRACE_DETAIL_PREVIEW_MAX_CHARS } from "./trace-detail";
 import type { SkillUsageEvent, SkillUsageSource } from "./skill-usage";
-import type { IndexedSession, SessionMessage, SessionTraceEvent } from "./types";
+import type { IndexedSession, SearchOptions, SessionMessage, SessionTraceEvent } from "./types";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string) => import("node:sqlite").DatabaseSync };
@@ -751,6 +751,70 @@ describe("SessionStore", () => {
     expect(page.sessions.map((session) => session.sessionKey)).toEqual(["codex:three", "codex:two"]);
     expect(page.totalCount).toBe(3);
     expect(page.hasMore).toBe(true);
+  });
+
+  it("applies live status filtering before page limits", () => {
+    const store = createInMemoryStore();
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:closed-newest",
+        rawId: "closed-newest",
+        timestamp: new Date("2026-06-03T10:00:00Z").getTime(),
+      }),
+      messages,
+    );
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:open-oldest",
+        rawId: "open-oldest",
+        timestamp: new Date("2026-06-01T10:00:00Z").getTime(),
+      }),
+      messages,
+    );
+
+    const page = store.searchSessionPage({
+      query: "",
+      sortBy: "created",
+      limit: 1,
+      liveStatus: "open",
+      liveSessionKeys: ["codex:open-oldest"],
+    } as SearchOptions);
+
+    expect(page.sessions.map((session) => session.sessionKey)).toEqual(["codex:open-oldest"]);
+    expect(page.totalCount).toBe(1);
+    expect(page.hasMore).toBe(false);
+  });
+
+  it("counts closed live status pages after excluding open sessions", () => {
+    const store = createInMemoryStore();
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:open-newest",
+        rawId: "open-newest",
+        timestamp: new Date("2026-06-03T10:00:00Z").getTime(),
+      }),
+      messages,
+    );
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:closed-oldest",
+        rawId: "closed-oldest",
+        timestamp: new Date("2026-06-01T10:00:00Z").getTime(),
+      }),
+      messages,
+    );
+
+    const page = store.searchSessionPage({
+      query: "",
+      sortBy: "created",
+      limit: 1,
+      liveStatus: "closed",
+      liveSessionKeys: ["codex:open-newest"],
+    } as SearchOptions);
+
+    expect(page.sessions.map((session) => session.sessionKey)).toEqual(["codex:closed-oldest"]);
+    expect(page.totalCount).toBe(1);
+    expect(page.hasMore).toBe(false);
   });
 
   it("deletes tags globally and removes unused tags after unlinking", () => {
