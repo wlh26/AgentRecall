@@ -535,6 +535,14 @@ function buildWezTermOpenArgsForCommand(command: string, cwd?: string): string[]
   return args;
 }
 
+async function runWarpCommand(command: string, runner: ProcessRunner = runProcess): Promise<void> {
+  await runAppleScript(`tell application "Warp"
+  activate
+  delay 0.2
+  tell application "System Events" to keystroke "${escapeAppleScript(command)}" & return
+end tell`, runner);
+}
+
 export function buildGhosttyOpenArgs(
   session: SessionSearchResult,
   settings: AppSettings,
@@ -607,11 +615,7 @@ end tell`);
 
   if (settings.defaultTerminal === "Warp") {
     if (sshArgs) {
-      await runAppleScript(`tell application "Warp"
-  activate
-  delay 0.2
-  tell application "System Events" to keystroke "${escapeAppleScript(command)}" & return
-end tell`);
+      await runWarpCommand(command);
     } else {
       await runProcess("/usr/bin/open", session.projectPath ? ["-a", "Warp", session.projectPath] : ["-a", "Warp"]);
     }
@@ -742,12 +746,15 @@ export async function openMigrationResumeInTerminal(
   } = {},
 ): Promise<void> {
   const platform = deps.platform ?? process.platform;
-  await openCommandInTerminal(
-    buildMigrationResumeCommands(target, sessionId, projectPath, settings, platform !== "win32"),
-    projectPath,
-    settings,
-    deps,
-  );
+  const commands = buildMigrationResumeCommands(target, sessionId, projectPath, settings, platform !== "win32");
+  const run = deps.runProcess ?? runProcess;
+
+  if (platform === "darwin" && settings.defaultTerminal === "Warp") {
+    await runWarpCommand(commands.posix, run);
+    return;
+  }
+
+  await openCommandInTerminal(commands, projectPath, settings, deps);
 }
 
 export async function resolveMacApplicationName(names: string[], runner: ProcessRunner = runProcess): Promise<string | null> {

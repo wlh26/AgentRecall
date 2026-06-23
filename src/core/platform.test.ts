@@ -826,12 +826,12 @@ describe("migration resume terminal launch", () => {
     ]);
   });
 
-  it("opens a Warp migration resume command by activating the app with the project path", async () => {
+  it("executes a Warp migration resume command with the target binary and cwd", async () => {
     const calls: Array<{ command: string; args: string[] }> = [];
     const settings = { ...defaultSettings, defaultTerminal: "Warp" as const, codexBinary: "/opt/Codex CLI/codex" };
 
     await withPlatform("darwin", async () => {
-      await openMigrationResumeInTerminal("codex", "session-warp", process.cwd(), settings, {
+      await openMigrationResumeInTerminal("codex", "session-warp", "/repo with spaces", settings, {
         runProcess: async (command, args) => {
           calls.push({ command, args });
         },
@@ -840,10 +840,15 @@ describe("migration resume terminal launch", () => {
 
     expect(calls).toEqual([
       {
-        command: "/usr/bin/open",
-        args: ["-a", "Warp", process.cwd()],
+        command: "/usr/bin/osascript",
+        args: [
+          "-e",
+          expect.stringContaining("tell application \"Warp\""),
+        ],
       },
     ]);
+    expect(calls[0].args[1]).toContain("cd '/repo with spaces' && '/opt/Codex CLI/codex' resume session-warp");
+    expect(calls[0].args[1]).not.toContain("-a \"Warp\"");
   });
 
   it("launches the Windows terminal plan without spawning a real process", async () => {
