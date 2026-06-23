@@ -34,6 +34,11 @@ export interface SessionMigrationDependencies {
     sessionId: string,
     projectPath: string,
   ) => string;
+  fallbackResumeCommand: (
+    target: MigrationAgent,
+    sessionId: string,
+    projectPath: string,
+  ) => string;
   onProgress?: (progress: SessionMigrationProgress) => void;
   idFactory: () => string;
   now: () => number;
@@ -224,8 +229,8 @@ async function validateMigrationRequest(
     throw new Error(`Session is already a ${sourceAgent} session.`);
   }
 
-  const projectPath = source.projectPath.trim();
-  if (!projectPath) {
+  const projectPath = source.projectPath;
+  if (!projectPath.trim()) {
     throw new Error("Session has no project path.");
   }
   if (!(await deps.projectPathExists(projectPath))) {
@@ -279,17 +284,6 @@ function safeResumeCommand(
     return deps.resumeCommand(target, sessionId, projectPath);
   } catch (error) {
     warnings.push(formatWarning("Failed to build resume command", error));
-    return fallbackResumeCommand(target, sessionId);
-  }
-}
-
-function fallbackResumeCommand(target: MigrationAgent, sessionId: string): string {
-  switch (target) {
-    case "claude":
-      return `claude --resume ${sessionId}`;
-    case "codex":
-      return `codex resume ${sessionId}`;
-    case "codebuddy":
-      return `codebuddy --resume ${sessionId}`;
+    return deps.fallbackResumeCommand(target, sessionId, projectPath);
   }
 }

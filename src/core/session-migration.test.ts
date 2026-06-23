@@ -120,6 +120,12 @@ function createDependencies() {
     callOrder.push("resumeCommand");
     return "codex resume target-session-1 --cwd /repo";
   });
+  const fallbackResumeCommand = vi.fn(
+    (target: string, sessionId: string, projectPath: string) => {
+      callOrder.push("fallbackResumeCommand");
+      return `cd '${projectPath}' && ${target} resume ${sessionId}`;
+    },
+  );
   const projectPathExists = vi.fn(async () => true);
   const projectPathIsDirectory = vi.fn(async () => true);
   const onProgress = vi.fn((event) => {
@@ -137,6 +143,7 @@ function createDependencies() {
       refreshIndex,
       launch,
       resumeCommand,
+      fallbackResumeCommand,
       projectPathExists,
       projectPathIsDirectory,
       onProgress,
@@ -152,6 +159,7 @@ function createDependencies() {
     refreshIndex,
     launch,
     resumeCommand,
+    fallbackResumeCommand,
     projectPathExists,
     projectPathIsDirectory,
     onProgress,
@@ -573,9 +581,17 @@ describe("migrateSession", () => {
     expect(resumeCommand).toHaveBeenCalledWith("codex", "target-session-1", "/repo");
   });
 
-  it("records before attempting resumeCommand and downgrades resumeCommand failure to warning", async () => {
-    const { deps, callOrder, record, refreshIndex, launch, resumeCommand, seenRecords } =
-      createDependencies();
+  it("records before attempting resumeCommand and downgrades resumeCommand failure to injected cwd-preserving fallback", async () => {
+    const {
+      deps,
+      callOrder,
+      record,
+      refreshIndex,
+      launch,
+      resumeCommand,
+      fallbackResumeCommand,
+      seenRecords,
+    } = createDependencies();
     resumeCommand.mockImplementation(() => {
       callOrder.push("resumeCommand");
       throw new Error("resume formatter failed");
@@ -598,12 +614,53 @@ describe("migrateSession", () => {
     ]);
     expect(callOrder.indexOf("record")).toBeLessThan(callOrder.indexOf("resumeCommand"));
     expect(result.targetFilePath).toBe("/tmp/target-session-1.jsonl");
-    expect(result.resumeCommand).toBe("codex resume target-session-1");
+    expect(callOrder.indexOf("resumeCommand")).toBeLessThan(callOrder.indexOf("fallbackResumeCommand"));
+    expect(result.resumeCommand).toBe("cd '/repo' && codex resume target-session-1");
     expect(result.indexed).toBe(true);
     expect(result.launched).toBe(true);
     expect(result.warning).toContain("Failed to build resume command: resume formatter failed");
+    expect(fallbackResumeCommand).toHaveBeenCalledWith("codex", "target-session-1", "/repo");
     expect(refreshIndex).toHaveBeenCalledOnce();
     expect(launch).toHaveBeenCalledOnce();
+  });
+
+  it("preserves a project path with leading and trailing spaces across validation, write, record, fallback formatting, and launch", async () => {
+    const rawProjectPath = "  /tmp/repo with spaces/  ";
+    const {
+      deps,
+      projectPathExists,
+      projectPathIsDirectory,
+      prepare,
+      write,
+      launch,
+      record,
+      resumeCommand,
+      fallbackResumeCommand,
+    } = createDependencies();
+    resumeCommand.mockImplementation(() => {
+      throw new Error("resume formatter failed");
+    });
+
+    const result = await migrateSession({
+      source: session("claude-cli", { projectPath: rawProjectPath }),
+      messages,
+      target: "codex",
+      deps,
+    });
+
+    expect(projectPathExists).toHaveBeenCalledWith(rawProjectPath);
+    expect(projectPathIsDirectory).toHaveBeenCalledWith(rawProjectPath);
+    expect(prepare.mock.calls[0]?.[0].projectPath).toBe(rawProjectPath);
+    expect(write).toHaveBeenCalledWith(
+      "codex",
+      expect.objectContaining({ projectPath: rawProjectPath }),
+    );
+    expect(record.mock.calls[0]?.[0].targetFilePath).toBe("/tmp/target-session-1.jsonl");
+    expect(record.mock.calls[0]?.[0].sourceSessionKey).toBe("claude-cli:1");
+    expect(resumeCommand).toHaveBeenCalledWith("codex", "target-session-1", rawProjectPath);
+    expect(fallbackResumeCommand).toHaveBeenCalledWith("codex", "target-session-1", rawProjectPath);
+    expect(launch).toHaveBeenCalledWith("codex", "target-session-1", rawProjectPath);
+    expect(result.resumeCommand).toBe(`cd '${rawProjectPath}' && codex resume target-session-1`);
   });
 
   it("merges multiple non-fatal warnings without overwriting earlier ones", async () => {

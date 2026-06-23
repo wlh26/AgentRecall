@@ -691,6 +691,22 @@ describe("migration cli process specs", () => {
     });
   });
 
+  it("preserves cwd with trailing spaces and single quotes in POSIX migration display commands", () => {
+    const settings = {
+      ...defaultSettings,
+      codexBinary: "/opt/Codex CLI/codex",
+    };
+
+    expect(
+      getMigrationResumeProcessSpec("codex", "session 1", "/repo it's me/ ", settings),
+    ).toEqual({
+      command: "/opt/Codex CLI/codex",
+      args: ["resume", "session 1"],
+      cwd: "/repo it's me/ ",
+      displayCommand: "cd '/repo it'\\''s me/ ' && '/opt/Codex CLI/codex' resume 'session 1'",
+    });
+  });
+
   it("builds Windows Cmd and PowerShell migration display commands safely for custom binaries", () => {
     withPlatform("win32", () => {
       const cmdSettings = {
