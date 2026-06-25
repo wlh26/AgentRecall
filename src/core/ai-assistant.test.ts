@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  extractFallbackKeywords,
   isLocalCliEndpoint,
   runAiAssistantFallback,
   runAiAssistantTurn,
@@ -98,8 +99,63 @@ describe("isLocalCliEndpoint", () => {
   });
 });
 
+describe("extractFallbackKeywords", () => {
+  it("distills the user's request into keywords via one CLI call", async () => {
+    let extractionPrompt = "";
+    const complete = async (_e: SummaryEndpoint, messages: { role: string; content: string }[]) => {
+      extractionPrompt = messages.map((m) => m.content).join("\n");
+      return "sqlite migration fix\n";
+    };
+    const keywords = await extractFallbackKeywords(
+      codexEndpoint,
+      [{ role: "user", content: "find my sqlite migration fix" }],
+      complete,
+    );
+    expect(keywords).toBe("sqlite migration fix");
+    expect(extractionPrompt).toContain("find my sqlite migration fix");
+  });
+
+  it("strips quotes and collapses whitespace, keeping only the first line", async () => {
+    const complete = async () => `  "sqlite   migration"  \nignored second line`;
+    const keywords = await extractFallbackKeywords(codexEndpoint, [{ role: "user", content: "x" }], complete);
+    expect(keywords).toBe("sqlite migration");
+  });
+
+  it("falls back to the verbatim request when extraction throws", async () => {
+    const complete = async () => {
+      throw new Error("cli crashed");
+    };
+    const keywords = await extractFallbackKeywords(
+      codexEndpoint,
+      [{ role: "user", content: "the auth refactor" }],
+      complete,
+    );
+    expect(keywords).toBe("the auth refactor");
+  });
+
+  it("falls back to the verbatim request when extraction returns empty", async () => {
+    const complete = async () => "   \n  ";
+    const keywords = await extractFallbackKeywords(codexEndpoint, [{ role: "user", content: "the auth refactor" }], complete);
+    expect(keywords).toBe("the auth refactor");
+  });
+});
+
+// Helper: a fake `complete` that returns extraction keywords (when the system
+// prompt is the keyword-extraction one) vs a grounding reply otherwise.
+function makeFakeComplete(extraction: () => string, grounding: (prompt: string) => string) {
+  let groundingPrompt = "";
+  const complete = async (_e: SummaryEndpoint, messages: { role: string; content: string }[]) => {
+    const system = messages.find((m) => m.role === "system")?.content ?? "";
+    const isExtraction = system.includes("convert a developer's natural-language request into search keywords");
+    if (isExtraction) return extraction();
+    groundingPrompt = messages.map((m) => m.content).join("\n");
+    return grounding(groundingPrompt);
+  };
+  return { complete, getGroundingPrompt: () => groundingPrompt };
+}
+
 describe("runAiAssistantFallback", () => {
-  it("searches with the user's words and asks the CLI to ground its answer over the hits", async () => {
+  it("extracts keywords, searches with them, and grounds the CLI answer over the hits", async () => {
     const hits: FallbackSessionHit[] = [
       { sessionKey: "s1", title: "Fix SQLite migration", source: "claude-cli", project: "/p", summary: "fixed it" },
       { sessionKey: "s2", title: "Other", source: "codex-cli", project: "/q", summary: null },
@@ -109,30 +165,89 @@ describe("runAiAssistantFallback", () => {
       searchedQuery = query;
       return hits;
     };
-    let promptSeen = "";
-    const complete = async (_e: SummaryEndpoint, messages: { role: string; content: string }[]) => {
-      promptSeen = messages.map((m) => m.content).join("\n");
-      return "The first session matches best.";
-    };
+    const { complete, getGroundingPrompt } = makeFakeComplete(
+      () => "sqlite migration",
+      () => "The first session matches best.",
+    );
 
     const history: AiChatMessage[] = [{ role: "user", content: "find my sqlite migration fix" }];
     const result = await runAiAssistantFallback(codexEndpoint, history, search, { complete });
 
-    expect(searchedQuery).toBe("find my sqlite migration fix");
+    expect(searchedQuery).toBe("sqlite migration");
     expect(result.reply).toBe("The first session matches best.");
     expect(result.sessionKeys).toEqual(["s1", "s2"]);
-    // The CLI prompt must include the candidate catalog so the answer is grounded.
-    expect(promptSeen).toContain("Fix SQLite migration");
-    expect(promptSeen).toContain("[1]");
+    // The grounding prompt keeps the original request and the candidate catalog.
+    const groundingPrompt = getGroundingPrompt();
+    expect(groundingPrompt).toContain("find my sqlite migration fix");
+    expect(groundingPrompt).toContain("Fix SQLite migration");
+    expect(groundingPrompt).toContain("[1]");
   });
 
-  it("tells the CLI when nothing matched", async () => {
-    const search = async (): Promise<FallbackSessionHit[]> => [];
-    let promptSeen = "";
-    const complete = async (_e: SummaryEndpoint, messages: { role: string; content: string }[]) => {
-      promptSeen = messages.map((m) => m.content).join("\n");
-      return "No matching sessions; try other keywords.";
+  it("retries with different keywords when the first search misses, then succeeds", async () => {
+    const queries: string[] = [];
+    const search = async (query: string): Promise<FallbackSessionHit[]> => {
+      queries.push(query);
+      // First keyword set misses; the second one hits.
+      return query === "second try"
+        ? [{ sessionKey: "s9", title: "Found it", source: "codex-cli", project: "/p", summary: null }]
+        : [];
     };
+    let extractionCalls = 0;
+    const extractionPrompts: string[] = [];
+    const complete = async (_e: SummaryEndpoint, messages: { role: string; content: string }[]) => {
+      const system = messages.find((m) => m.role === "system")?.content ?? "";
+      if (system.includes("convert a developer's natural-language request into search keywords")) {
+        extractionCalls += 1;
+        extractionPrompts.push(messages.find((m) => m.role === "user")?.content ?? "");
+        return extractionCalls === 1 ? "first try" : "second try";
+      }
+      return "Found the session you wanted.";
+    };
+
+    const result = await runAiAssistantFallback(
+      codexEndpoint,
+      [{ role: "user", content: "find that thing" }],
+      search,
+      { complete },
+    );
+
+    expect(queries).toEqual(["first try", "second try"]);
+    expect(result.sessionKeys).toEqual(["s9"]);
+    // The retry's extraction prompt must mention the keyword set that missed.
+    expect(extractionPrompts[1]).toContain("first try");
+    expect(extractionPrompts[1]).toContain("NO results");
+  });
+
+  it("stops retrying once a keyword set repeats", async () => {
+    const queries: string[] = [];
+    const search = async (query: string): Promise<FallbackSessionHit[]> => {
+      queries.push(query);
+      return [];
+    };
+    // Extraction always returns the same keywords -> loop must bail after one search.
+    const { complete } = makeFakeComplete(
+      () => "same keywords",
+      () => "Nothing found.",
+    );
+
+    const result = await runAiAssistantFallback(
+      codexEndpoint,
+      [{ role: "user", content: "x" }],
+      search,
+      { complete },
+    );
+
+    expect(queries).toEqual(["same keywords"]);
+    expect(result.sessionKeys).toEqual([]);
+  });
+
+  it("tells the CLI when nothing matched after all attempts", async () => {
+    const search = async (): Promise<FallbackSessionHit[]> => [];
+    let extractionCalls = 0;
+    const { complete, getGroundingPrompt } = makeFakeComplete(
+      () => `attempt-${++extractionCalls}`,
+      () => "No matching sessions; try other keywords.",
+    );
 
     const result = await runAiAssistantFallback(
       codexEndpoint,
@@ -142,6 +257,8 @@ describe("runAiAssistantFallback", () => {
     );
 
     expect(result.sessionKeys).toEqual([]);
-    expect(promptSeen).toContain("No sessions matched");
+    // It exhausts the round budget and reports the keyword sets it tried.
+    expect(extractionCalls).toBe(3);
+    expect(getGroundingPrompt()).toContain("No sessions matched");
   });
 });

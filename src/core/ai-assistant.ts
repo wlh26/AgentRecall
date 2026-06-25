@@ -52,9 +52,13 @@ export interface AiAssistantReplyInternal {
 export const AI_ASSISTANT_SYSTEM_PROMPT =
   "You are the session-search assistant inside a desktop app that indexes the user's past AI coding sessions " +
   "(Claude Code, Codex, CodeBuddy, etc.). The user describes a session they are trying to find; your job is to " +
-  "locate it. ALWAYS use the provided tools to search — never guess from memory. Prefer search_sessions with " +
-  "concise keywords; call it multiple times with different keywords if the first attempt misses. Use list_projects " +
-  "or list_tags to narrow scope when helpful, and get_session to confirm a candidate. " +
+  "locate it. ALWAYS use the provided tools to search — never guess from memory. " +
+  "Before searching, distill the user's request into a few precise search keywords: keep concrete nouns, " +
+  "technical terms, file names, error messages, and identifiers; drop filler words, pronouns, and conversational " +
+  "phrasing (e.g. 'find the session where I', 'help me look for'). Search in the same language the user wrote in. " +
+  "Prefer search_sessions with those concise keywords; call it multiple times with different keyword sets if the " +
+  "first attempt misses. Use list_projects or list_tags to narrow scope when helpful, and get_session to confirm a " +
+  "candidate. " +
   "When you have results, reply briefly (in the same language the user wrote in) and explain why each match fits. " +
   "Do not invent sessionKeys. If nothing matches, say so and suggest different keywords.";
 
@@ -193,13 +197,76 @@ const FALLBACK_SYSTEM_PROMPT =
   "Pick the best matches, answer briefly in the same language the user wrote in, and refer to sessions by their " +
   "title. If none fit, say so and suggest different keywords. Do not invent sessions.";
 
-// Pulls plain keywords from the latest user message for the store's FTS search.
-// We strip punctuation and keep it simple — the store does the real matching.
+// One-shot CLIs (codex exec / claude) cannot do HTTP function calling, so the
+// model never gets to pick search terms itself. To approximate the tool-calling
+// path we run a bounded search loop: ask the CLI for keywords, run the FTS
+// search, and — if nothing matched — ask it for *different* keywords and try
+// again, up to MAX_FALLBACK_SEARCH_ROUNDS times. Only the search tool is
+// exposed (no get_session etc.), keeping the protocol simple and predictable.
+const KEYWORD_EXTRACTION_SYSTEM_PROMPT =
+  "You convert a developer's natural-language request into search keywords for a full-text search over their past " +
+  "AI-coding sessions. Output ONLY the keywords, space-separated, on a single line — no quotes, no explanation, no " +
+  "punctuation. Keep concrete nouns, technical terms, file names, error messages, and identifiers; drop filler " +
+  "words, pronouns, and conversational phrasing (e.g. 'find the session where I', 'help me look for'). Preserve the " +
+  "user's language. Return at most 8 keywords.";
+
+// How many keyword/search attempts the CLI fallback gets. The first round uses
+// the user's request; later rounds ask for alternative keywords after a miss.
+const MAX_FALLBACK_SEARCH_ROUNDS = 3;
+
+// Pulls the latest user message verbatim. Used as the grounding context and as
+// the fallback query when keyword extraction yields nothing useful.
 export function extractFallbackQuery(history: readonly AiChatMessage[]): string {
   for (let i = history.length - 1; i >= 0; i -= 1) {
     if (history[i].role === "user") return history[i].content.trim();
   }
   return "";
+}
+
+// Single-line cleanup of whatever the CLI returns: collapse whitespace, strip
+// surrounding quotes/punctuation noise, and cap length so a chatty model can't
+// poison the FTS query.
+function sanitizeKeywords(raw: string): string {
+  const firstLine = raw.split(/\r?\n/).map((line) => line.trim()).find((line) => line.length > 0) ?? "";
+  return firstLine
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+}
+
+// Asks the CLI to distill the request into keywords. `previousAttempts` lists
+// keyword sets that already returned nothing, so the model is told to try
+// different terms on a retry. On any failure (or empty result) it returns the
+// verbatim request so search still runs.
+export async function extractFallbackKeywords(
+  endpoint: SummaryEndpoint,
+  history: readonly AiChatMessage[],
+  complete: PlainCompletionFn,
+  options: { previousAttempts?: readonly string[]; signal?: AbortSignal } = {},
+): Promise<string> {
+  const request = extractFallbackQuery(history);
+  if (!request) return "";
+  const previousAttempts = options.previousAttempts ?? [];
+  const userContent = previousAttempts.length
+    ? `Request: ${request}\n\nThese keyword sets already returned NO results, so avoid them and try different ` +
+      `terms (synonyms, broader or more specific words):\n${previousAttempts.map((a) => `- ${a}`).join("\n")}`
+    : request;
+  try {
+    const raw = await complete(
+      endpoint,
+      [
+        { role: "system", content: KEYWORD_EXTRACTION_SYSTEM_PROMPT },
+        { role: "user", content: userContent },
+      ],
+      options.signal,
+    );
+    const keywords = sanitizeKeywords(raw);
+    return keywords || request;
+  } catch {
+    // Extraction is best-effort; never let it break the actual search.
+    return request;
+  }
 }
 
 export async function runAiAssistantFallback(
@@ -209,9 +276,26 @@ export async function runAiAssistantFallback(
   options: { complete?: PlainCompletionFn; signal?: AbortSignal } = {},
 ): Promise<AiAssistantReplyInternal> {
   const complete = options.complete ?? requestSummaryCompletion;
-  const query = extractFallbackQuery(history);
-  const hits = query ? await search(query) : [];
+  const request = extractFallbackQuery(history);
 
+  // Bounded keyword/search loop: keep trying different keywords until we get
+  // hits or run out of rounds. Only the search tool is exposed here.
+  const attempts: string[] = [];
+  let hits: FallbackSessionHit[] = [];
+  if (request) {
+    for (let round = 0; round < MAX_FALLBACK_SEARCH_ROUNDS; round += 1) {
+      const query = await extractFallbackKeywords(endpoint, history, complete, {
+        previousAttempts: attempts,
+        signal: options.signal,
+      });
+      if (!query || attempts.includes(query)) break; // nothing new to try
+      attempts.push(query);
+      hits = await search(query);
+      if (hits.length > 0) break;
+    }
+  }
+
+  const usedKeywords = attempts.join(" | ") || request;
   const catalog = hits
     .map((hit, index) => {
       const summary = hit.summary ? ` — ${hit.summary}` : "";
@@ -220,8 +304,8 @@ export async function runAiAssistantFallback(
     .join("\n");
 
   const userPrompt = hits.length
-    ? `User request: ${query}\n\nCandidate sessions:\n${catalog}\n\nWhich of these best match, and why?`
-    : `User request: ${query}\n\nNo sessions matched a keyword search of the local history.`;
+    ? `User request: ${request}\n\nSearched with keywords: ${usedKeywords}\n\nCandidate sessions:\n${catalog}\n\nWhich of these best match, and why?`
+    : `User request: ${request}\n\nTried these keyword sets: ${usedKeywords}\n\nNo sessions matched any of them in the local history.`;
 
   const reply = await complete(
     endpoint,
