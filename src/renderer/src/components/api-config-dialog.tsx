@@ -163,7 +163,7 @@ export function ApiConfigDialog({
             Claude Code
           </button>
           <button type="button" className={apiTarget === "summary" ? "active" : ""} onClick={() => setApiTarget("summary")}>
-            {l("AI Summary", "AI 摘要")}
+            {l("AI Summary & Search", "AI 摘要与搜索")}
           </button>
         </div>
         <div className="api-config-body">
@@ -519,15 +519,15 @@ export function ApiConfigDialog({
           ) : (
             <section className="settings-pane api-settings-form">
               <header className="settings-pane-head">
-                <h3>{l("AI summary source", "AI 摘要来源")}</h3>
+                <h3>{l("AI summary & search source", "AI 摘要与搜索来源")}</h3>
                 <p>
                   {l(
-                    "Choose Codex or Claude Code, or call a summary API provider directly. Direct API providers such as DeepSeek and GLM do not create agent sessions.",
-                    "选择 Codex / Claude Code，或直接调用摘要 API 供应商。DeepSeek、GLM 等直接 API 不会创建 agent session。",
+                    "Powers both AI session summaries and the AI session finder. Choose Codex or Claude Code, or call an API provider directly. Direct API providers such as DeepSeek and GLM do not create agent sessions.",
+                    "同时驱动 AI 会话摘要和 AI 找会话。选择 Codex / Claude Code，或直接调用 API 供应商。DeepSeek、GLM 等直接 API 不会创建 agent session。",
                   )}
                 </p>
               </header>
-              <div className="api-provider-switch" role="group" aria-label={l("AI summary source", "AI 摘要来源")}>
+              <div className="api-provider-switch" role="group" aria-label={l("AI summary & search source", "AI 摘要与搜索来源")}>
                 <button
                   type="button"
                   className={(settings?.summarySource ?? "codex") === "codex" ? "active" : ""}
@@ -577,7 +577,7 @@ export function ApiConfigDialog({
                   <label className="settings-field">
                     <div className="settings-field-text">
                       <span className="settings-field-title">{l("Model", "模型")}</span>
-                      <span className="settings-field-sub">{l("Summary API model.", "摘要 API 模型。")}</span>
+                      <span className="settings-field-sub">{l("API model used for summaries and search.", "用于摘要与搜索的 API 模型。")}</span>
                     </div>
                     <input
                       type="text"
