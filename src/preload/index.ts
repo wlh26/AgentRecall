@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { AiChatMessage } from "../core/ai-assistant";
 import type { ApiConfig, ClaudeApiConfig } from "../core/api-config";
 import type { ApplyClaudeProfileResult } from "../core/claude-profile";
 import type { CodexChatProxyStatus } from "../core/codex-chat-proxy";
@@ -28,8 +29,14 @@ import type {
   UsageQuotaSnapshot,
 } from "../core/types";
 
+export interface AiAssistantReply {
+  reply: string;
+  sessions: SessionSearchResult[];
+}
+
 const api = {
   platform: process.platform as NodeJS.Platform,
+  askAiAssistant: (messages: AiChatMessage[]): Promise<AiAssistantReply> => ipcRenderer.invoke("ai:assistant-chat", messages),
   searchSessions: (options: SearchOptions): Promise<SessionSearchResult[]> => ipcRenderer.invoke("search:sessions", options),
   searchSessionPage: (options: SearchOptions): Promise<SessionSearchPage> => ipcRenderer.invoke("search:session-page", options),
   getSession: (sessionKey: string): Promise<SessionSearchResult | null> => ipcRenderer.invoke("session:get", sessionKey),

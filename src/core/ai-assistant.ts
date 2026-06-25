@@ -1,0 +1,351 @@
+// Conversational AI assistant that finds past sessions by calling search tools.
+//
+// The model is given function-calling tools mirroring the MCP server
+// (search_sessions / list_projects / list_tags / get_session). It decides which
+// tools to call, we execute them against the local SessionStore, feed results
+// back, and loop until the model produces a final text answer. Along the way we
+// collect every sessionKey the model surfaced so the UI can render clickable
+// session cards.
+//
+// The transport layer mirrors session-summarizer.ts (OpenAI /chat/completions
+// and Anthropic /v1/messages) but adds tool support. Network functions are
+// injectable so the tool-call loop is unit-testable without a real provider.
+
+import type { SummaryEndpoint } from "./session-summarizer";
+
+export type { SummaryEndpoint } from "./session-summarizer";
+
+// A chat message in our neutral representation. Tool results are carried as a
+// `tool` role with the originating call id so both provider formats can rebuild
+// their own wire shape.
+export interface AiChatMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  // Present on assistant turns that requested tool calls.
+  toolCalls?: AiToolCall[];
+  // Present on `tool` messages: which call this is answering.
+  toolCallId?: string;
+  toolName?: string;
+}
+
+export interface AiToolCall {
+  id: string;
+  name: string;
+  // Raw JSON arguments string as emitted by the model.
+  arguments: string;
+}
+
+// What the main process injects: runs one tool and returns a JSON-serializable
+// result, plus the sessionKeys that result surfaced (for UI cards).
+export interface ToolExecutionResult {
+  result: unknown;
+  sessionKeys: string[];
+}
+
+export type ToolExecutor = (name: string, args: Record<string, unknown>) => Promise<ToolExecutionResult>;
+
+export interface AiAssistantReplyInternal {
+  reply: string;
+  sessionKeys: string[];
+}
+
+export const AI_ASSISTANT_SYSTEM_PROMPT =
+  "You are the session-search assistant inside a desktop app that indexes the user's past AI coding sessions " +
+  "(Claude Code, Codex, CodeBuddy, etc.). The user describes a session they are trying to find; your job is to " +
+  "locate it. ALWAYS use the provided tools to search — never guess from memory. Prefer search_sessions with " +
+  "concise keywords; call it multiple times with different keywords if the first attempt misses. Use list_projects " +
+  "or list_tags to narrow scope when helpful, and get_session to confirm a candidate. " +
+  "When you have results, reply briefly (in the same language the user wrote in) and explain why each match fits. " +
+  "Do not invent sessionKeys. If nothing matches, say so and suggest different keywords.";
+
+// Tool schema in a neutral shape; converted per-provider below.
+interface ToolSchema {
+  name: string;
+  description: string;
+  parameters: {
+    type: "object";
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
+export const AI_TOOL_SCHEMAS: ToolSchema[] = [
+  {
+    name: "search_sessions",
+    description:
+      "Search past AI coding sessions by keywords. Matches titles, first questions, transcripts, and AI summaries.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Keywords to search for." },
+        source: { type: "string", description: "Optional source filter, e.g. claude-cli or codex-cli." },
+        project: { type: "string", description: "Optional substring match on the project path." },
+        limit: { type: "number", description: "Max results (1-50, default 20)." },
+      },
+    },
+  },
+  {
+    name: "list_projects",
+    description: "List indexed projects with their session counts.",
+    parameters: { type: "object", properties: {} },
+  },
+  {
+    name: "list_tags",
+    description: "List all user-created tags.",
+    parameters: { type: "object", properties: {} },
+  },
+  {
+    name: "get_session",
+    description: "Fetch a single session's metadata, AI summary, and messages by its sessionKey.",
+    parameters: {
+      type: "object",
+      properties: {
+        sessionKey: { type: "string", description: "Session key from a search result." },
+        maxMessages: { type: "number", description: "Max messages to return (1-200, default 40)." },
+        offset: { type: "number", description: "Message index to start from." },
+      },
+      required: ["sessionKey"],
+    },
+  },
+];
+
+// One round-trip to the LLM. Returns either an assistant text reply or a set of
+// tool calls the caller must execute and feed back. Injectable for testing.
+export type ToolChatCompletionFn = (
+  endpoint: SummaryEndpoint,
+  messages: AiChatMessage[],
+  signal?: AbortSignal,
+) => Promise<{ content: string; toolCalls: AiToolCall[] }>;
+
+const MAX_TOOL_ROUNDS = 6;
+
+// Drives the tool-call loop: call the model, run any requested tools, feed the
+// results back, repeat until the model answers in plain text (or we hit the
+// round cap). Returns the final reply plus every sessionKey surfaced by tools.
+export async function runAiAssistantTurn(
+  endpoint: SummaryEndpoint,
+  history: AiChatMessage[],
+  executeTool: ToolExecutor,
+  options: { chat?: ToolChatCompletionFn; signal?: AbortSignal } = {},
+): Promise<AiAssistantReplyInternal> {
+  const chat = options.chat ?? defaultToolChatCompletion;
+  const messages: AiChatMessage[] = [{ role: "system", content: AI_ASSISTANT_SYSTEM_PROMPT }, ...history];
+  const sessionKeys: string[] = [];
+
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+    const { content, toolCalls } = await chat(endpoint, messages, options.signal);
+
+    if (toolCalls.length === 0) {
+      return { reply: content.trim(), sessionKeys: dedupe(sessionKeys) };
+    }
+
+    // Record the assistant's tool-call turn so the next round has context.
+    messages.push({ role: "assistant", content, toolCalls });
+
+    for (const call of toolCalls) {
+      const args = parseToolArgs(call.arguments);
+      let resultText: string;
+      try {
+        const execution = await executeTool(call.name, args);
+        for (const key of execution.sessionKeys) sessionKeys.push(key);
+        resultText = JSON.stringify(execution.result);
+      } catch (error) {
+        resultText = JSON.stringify({ error: error instanceof Error ? error.message : String(error) });
+      }
+      messages.push({ role: "tool", content: resultText, toolCallId: call.id, toolName: call.name });
+    }
+  }
+
+  // Hit the round cap: ask once more for a final answer with tools disabled.
+  const final = await chat(endpoint, [...messages, { role: "user", content: "Summarize what you found so far." }], options.signal);
+  return { reply: final.content.trim(), sessionKeys: dedupe(sessionKeys) };
+}
+
+function parseToolArgs(raw: string): Record<string, unknown> {
+  if (!raw || !raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function dedupe(keys: string[]): string[] {
+  return [...new Set(keys)];
+}
+
+// ---------------------------------------------------------------------------
+// Transport: OpenAI and Anthropic with tool support.
+// ---------------------------------------------------------------------------
+
+const REQUEST_TIMEOUT_MS = 60_000;
+
+function defaultToolChatCompletion(
+  endpoint: SummaryEndpoint,
+  messages: AiChatMessage[],
+  signal?: AbortSignal,
+): Promise<{ content: string; toolCalls: AiToolCall[] }> {
+  return endpoint.apiFormat === "anthropic"
+    ? anthropicToolCompletion(endpoint, messages, signal)
+    : openaiToolCompletion(endpoint, messages, signal);
+}
+
+export const requestAssistantCompletion: ToolChatCompletionFn = defaultToolChatCompletion;
+
+async function postJson(url: string, headers: Record<string, string>, body: unknown, signal?: AbortSignal): Promise<Response> {
+  const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  const merged = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+  try {
+    return await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify(body),
+      signal: merged,
+    });
+  } catch (error) {
+    if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+      throw new Error(`AI assistant request timed out after ${REQUEST_TIMEOUT_MS / 1000}s.`);
+    }
+    throw error;
+  }
+}
+
+async function safeReadText(response: Response): Promise<string> {
+  try {
+    const text = (await response.text()).trim();
+    return text.length > 300 ? `${text.slice(0, 300)}…` : text;
+  } catch {
+    return "";
+  }
+}
+
+// --- OpenAI /chat/completions with tools ---
+
+function openaiTools(): unknown[] {
+  return AI_TOOL_SCHEMAS.map((tool) => ({
+    type: "function",
+    function: { name: tool.name, description: tool.description, parameters: tool.parameters },
+  }));
+}
+
+function toOpenAiMessages(messages: AiChatMessage[]): unknown[] {
+  return messages.map((message) => {
+    if (message.role === "tool") {
+      return { role: "tool", tool_call_id: message.toolCallId, content: message.content };
+    }
+    if (message.role === "assistant" && message.toolCalls && message.toolCalls.length > 0) {
+      return {
+        role: "assistant",
+        content: message.content || null,
+        tool_calls: message.toolCalls.map((call) => ({
+          id: call.id,
+          type: "function",
+          function: { name: call.name, arguments: call.arguments },
+        })),
+      };
+    }
+    return { role: message.role, content: message.content };
+  });
+}
+
+async function openaiToolCompletion(
+  endpoint: SummaryEndpoint,
+  messages: AiChatMessage[],
+  signal?: AbortSignal,
+): Promise<{ content: string; toolCalls: AiToolCall[] }> {
+  const response = await postJson(
+    `${endpoint.baseUrl}/chat/completions`,
+    { Authorization: `Bearer ${endpoint.apiKey}` },
+    { model: endpoint.model, messages: toOpenAiMessages(messages), tools: openaiTools(), temperature: 0.2, stream: false },
+    signal,
+  );
+  if (!response.ok) {
+    const detail = await safeReadText(response);
+    throw new Error(`AI assistant request failed (HTTP ${response.status}). ${detail}`.trim());
+  }
+  const data = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string | null; tool_calls?: Array<{ id?: string; function?: { name?: string; arguments?: string } }> } }>;
+  };
+  const message = data.choices?.[0]?.message;
+  const toolCalls: AiToolCall[] = (message?.tool_calls ?? [])
+    .map((call, index) => ({
+      id: call.id || `call_${index}`,
+      name: call.function?.name ?? "",
+      arguments: call.function?.arguments ?? "{}",
+    }))
+    .filter((call) => call.name);
+  return { content: typeof message?.content === "string" ? message.content : "", toolCalls };
+}
+
+// --- Anthropic /v1/messages with tools ---
+
+function anthropicTools(): unknown[] {
+  return AI_TOOL_SCHEMAS.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    input_schema: tool.parameters,
+  }));
+}
+
+// Anthropic keeps system separate and uses content blocks; tool results go in a
+// `user` message as tool_result blocks, tool calls in `assistant` as tool_use.
+function toAnthropicMessages(messages: AiChatMessage[]): { system: string; messages: unknown[] } {
+  const system = messages.find((m) => m.role === "system")?.content ?? "";
+  const out: unknown[] = [];
+  for (const message of messages) {
+    if (message.role === "system") continue;
+    if (message.role === "tool") {
+      out.push({
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: message.toolCallId, content: message.content }],
+      });
+      continue;
+    }
+    if (message.role === "assistant" && message.toolCalls && message.toolCalls.length > 0) {
+      const blocks: unknown[] = [];
+      if (message.content) blocks.push({ type: "text", text: message.content });
+      for (const call of message.toolCalls) {
+        blocks.push({ type: "tool_use", id: call.id, name: call.name, input: parseToolArgs(call.arguments) });
+      }
+      out.push({ role: "assistant", content: blocks });
+      continue;
+    }
+    out.push({ role: message.role, content: message.content });
+  }
+  return { system, messages: out };
+}
+
+async function anthropicToolCompletion(
+  endpoint: SummaryEndpoint,
+  messages: AiChatMessage[],
+  signal?: AbortSignal,
+): Promise<{ content: string; toolCalls: AiToolCall[] }> {
+  const { system, messages: anthropicMessages } = toAnthropicMessages(messages);
+  const response = await postJson(
+    `${endpoint.baseUrl}/v1/messages`,
+    { "x-api-key": endpoint.apiKey, Authorization: `Bearer ${endpoint.apiKey}`, "anthropic-version": "2023-06-01" },
+    { model: endpoint.model, max_tokens: 1024, system, messages: anthropicMessages, tools: anthropicTools() },
+    signal,
+  );
+  if (!response.ok) {
+    const detail = await safeReadText(response);
+    throw new Error(`AI assistant request failed (HTTP ${response.status}). ${detail}`.trim());
+  }
+  const data = (await response.json()) as {
+    content?: Array<{ type?: string; text?: string; id?: string; name?: string; input?: unknown }>;
+  };
+  const blocks = Array.isArray(data.content) ? data.content : [];
+  const text = blocks
+    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("");
+  const toolCalls: AiToolCall[] = blocks
+    .filter((block) => block.type === "tool_use" && block.name)
+    .map((block, index) => ({
+      id: block.id || `call_${index}`,
+      name: block.name ?? "",
+      arguments: JSON.stringify(block.input ?? {}),
+    }));
+  return { content: text, toolCalls };
+}

@@ -1,0 +1,178 @@
+import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from "react";
+import { ArrowUp, FolderOpen, Sparkles, X } from "lucide-react";
+import type { AiChatMessage } from "../../../core/ai-assistant";
+import type { SessionSearchResult } from "../../../core/types";
+import { SOURCE_LABEL } from "../session-ui";
+import { localize, type LanguageMode } from "../language";
+import { Markdown } from "../lightweight-markdown";
+
+// A single chat turn shown in the dialog. Assistant turns may carry the sessions
+// the model surfaced, rendered as clickable cards under the reply.
+interface DisplayMessage {
+  role: "user" | "assistant";
+  content: string;
+  sessions?: SessionSearchResult[];
+}
+
+export function AiAssistantDialog({
+  language,
+  onOpenSession,
+  onClose,
+}: {
+  language: LanguageMode;
+  onOpenSession: (session: SessionSearchResult) => void;
+  onClose: () => void;
+}): ReactElement {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages, pending]);
+
+  // Auto-grow the textarea so the send button stays bottom-aligned with it.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+  }, [input]);
+
+  const send = async (): Promise<void> => {
+    const text = input.trim();
+    if (!text || pending) return;
+    setError(null);
+    const nextMessages: DisplayMessage[] = [...messages, { role: "user", content: text }];
+    setMessages(nextMessages);
+    setInput("");
+    setPending(true);
+    try {
+      // Send full history (user + assistant text) so the model keeps context.
+      const history: AiChatMessage[] = nextMessages.map((message) => ({ role: message.role, content: message.content }));
+      const reply = await window.sessionSearch.askAiAssistant(history);
+      setMessages((current) => [...current, { role: "assistant", content: reply.reply, sessions: reply.sessions }]);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void send();
+    }
+  };
+
+  return (
+    <div className="dialog-backdrop" onMouseDown={onClose}>
+      <section className="command-dialog ai-assistant-dialog" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="dialog-title">
+          <span className="ai-assistant-title">
+            <Sparkles size={15} />
+            {l("AI session finder", "AI 找会话")}
+          </span>
+          <button type="button" className="icon-button" onClick={onClose} aria-label={l("Close", "关闭")}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="ai-assistant-messages" ref={scrollRef}>
+          {messages.length === 0 ? (
+            <div className="ai-assistant-empty">
+              <Sparkles size={22} />
+              <p>{l("Describe the session you're looking for and I'll search your history.", "描述你想找的会话，我会在历史记录里帮你搜索。")}</p>
+              <p className="ai-assistant-hint">
+                {l('e.g. "the session where I fixed the SQLite migration bug"', "例如：“我修复 SQLite 迁移 bug 的那次会话”")}
+              </p>
+            </div>
+          ) : null}
+
+          {messages.map((message, index) => (
+            <div key={index} className={`ai-message ai-message-${message.role}`}>
+              <div className="ai-message-bubble">
+                {message.role === "assistant" ? <Markdown text={message.content} /> : message.content}
+              </div>
+              {message.sessions && message.sessions.length > 0 ? (
+                <div className="ai-session-cards">
+                  {message.sessions.map((session) => (
+                    <div
+                      key={session.sessionKey}
+                      role="button"
+                      tabIndex={0}
+                      className="ai-session-card"
+                      onClick={() => {
+                        // Don't open when the user is selecting text inside the card.
+                        if ((window.getSelection()?.toString() ?? "").length > 0) return;
+                        onOpenSession(session);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          onOpenSession(session);
+                        }
+                      }}
+                    >
+                      <div className="ai-session-card-title">{session.displayTitle}</div>
+                      <div className="ai-session-card-meta">
+                        <span className="ai-session-card-source">{SOURCE_LABEL[session.source] ?? session.source}</span>
+                        {session.projectPath ? (
+                          <span className="ai-session-card-project">
+                            <FolderOpen size={11} />
+                            {session.projectPath}
+                          </span>
+                        ) : null}
+                      </div>
+                      {session.aiSummary ? (
+                        <div className="ai-session-card-summary">
+                          <Markdown text={session.aiSummary} />
+                        </div>
+                      ) : null}
+                      <span className="ai-session-card-open">{l("Open session", "打开会话")} →</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ))}
+
+          {pending ? (
+            <div className="ai-message ai-message-assistant">
+              <div className="ai-message-bubble ai-message-pending">
+                <span className="ai-typing">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </span>
+                {l("Searching…", "搜索中…")}
+              </div>
+            </div>
+          ) : null}
+          {error ? <div className="ai-assistant-error">{error}</div> : null}
+        </div>
+
+        <div className="ai-assistant-input">
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={l("Ask to find a session…", "描述要查找的会话…")}
+            rows={1}
+            autoFocus
+          />
+          <button type="button" className="ai-assistant-send" onClick={() => void send()} disabled={pending || !input.trim()} aria-label={l("Send", "发送")}>
+            <ArrowUp size={16} />
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}

@@ -101,6 +101,7 @@ import { DetailPanel } from "./components/detail-panel";
 import { SessionMigrationDialog, SessionMigrationLaunchFailedDialog } from "./components/session-migration-dialog";
 import { CommandDialog, DeleteSessionDialog, DeleteTagDialog } from "./components/session-dialogs";
 import { SkillsDialog } from "./components/skills-dialog";
+import { AiAssistantDialog } from "./components/ai-assistant-dialog";
 import { useClampedContextMenuStyle } from "./context-menu-position";
 import {
   SOURCE_LABEL,
@@ -326,6 +327,7 @@ export function App(): ReactElement {
   const [sshDialogOpen, setSshDialogOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [apiConfigOpen, setApiConfigOpen] = useState(false);
+  const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
   const [installedSkills, setInstalledSkills] = useState<InstalledSkillsSnapshot>(EMPTY_SKILLS);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [skillsFeedback, setSkillsFeedback] = useState<SkillsFeedback>(null);
@@ -688,6 +690,7 @@ export function App(): ReactElement {
         else if (contextMenu) setContextMenu(null);
         else if (skillsOpen) setSkillsOpen(false);
         else if (apiConfigOpen) setApiConfigOpen(false);
+        else if (aiAssistantOpen) setAiAssistantOpen(false);
         else if (settingsOpen) setSettingsOpen(false);
         else if (detail) closeDetail();
         else return;
@@ -736,7 +739,7 @@ export function App(): ReactElement {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [displayedResults, selectedKey, detail, dialog, migrationDialog, deleteSessionCandidate, deletingSession, deleteTagName, contextMenu, skillsOpen, apiConfigOpen, settingsOpen, sshDialogOpen, actionStatus, t]);
+  }, [displayedResults, selectedKey, detail, dialog, migrationDialog, deleteSessionCandidate, deletingSession, deleteTagName, contextMenu, skillsOpen, apiConfigOpen, aiAssistantOpen, settingsOpen, sshDialogOpen, actionStatus, t]);
 
   useEffect(() => {
     if (!selectedKey) return;
@@ -744,9 +747,9 @@ export function App(): ReactElement {
   }, [selectedKey]);
 
   useEffect(() => {
-    document.body.classList.toggle("overlay-open", Boolean(detail || skillsOpen || apiConfigOpen || settingsOpen || sshDialogOpen));
+    document.body.classList.toggle("overlay-open", Boolean(detail || skillsOpen || apiConfigOpen || aiAssistantOpen || settingsOpen || sshDialogOpen));
     return () => document.body.classList.remove("overlay-open");
-  }, [detail, skillsOpen, apiConfigOpen, settingsOpen, sshDialogOpen]);
+  }, [detail, skillsOpen, apiConfigOpen, aiAssistantOpen, settingsOpen, sshDialogOpen]);
 
   const visibleSourceFilters = useMemo(() => {
     if (!appSettings) return sourceFilters(null);
@@ -1514,6 +1517,19 @@ export function App(): ReactElement {
           </div>
           <div className="top-actions">
             <button
+              className={`icon-button toolbar-icon-button ${aiAssistantOpen ? "active" : ""}`}
+              onClick={() => {
+                setSettingsOpen(false);
+                setApiConfigOpen(false);
+                setSkillsOpen(false);
+                setAiAssistantOpen(true);
+              }}
+              title={t("AI session finder", "AI 找会话")}
+              aria-label={t("AI session finder", "AI 找会话")}
+            >
+              <Sparkles size={15} />
+            </button>
+            <button
               className={`icon-button toolbar-icon-button ${skillsOpen ? "active" : ""}`}
               onClick={() => {
                 setSettingsOpen(false);
@@ -1823,6 +1839,17 @@ export function App(): ReactElement {
           }
           onDelete={(skill) => deleteSkill(skill)}
           onClose={() => setSkillsOpen(false)}
+        />
+      ) : null}
+
+      {aiAssistantOpen ? (
+        <AiAssistantDialog
+          language={language}
+          onOpenSession={(session) => {
+            setAiAssistantOpen(false);
+            void openDetail(session);
+          }}
+          onClose={() => setAiAssistantOpen(false)}
         />
       ) : null}
     </main>
