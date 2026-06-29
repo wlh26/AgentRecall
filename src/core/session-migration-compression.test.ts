@@ -4,25 +4,44 @@ import {
   buildLocalMigrationFallback,
   buildMigrationHandoffMessages,
   createMigrationCompressor,
+  formatCompactSummary,
+  parseMigrationHandoff,
 } from "./session-migration-compression";
 import { estimatePortableSessionTokens, MIGRATION_TOKEN_LIMIT } from "./session-migration";
 import type { PortableSession, SessionMessage } from "./types";
 
 const STARTED_AT = "2026-06-23T00:00:00.000Z";
-const VALID_HANDOFF = [
-  "## 目标与约束",
-  "完成跨 Agent 迁移，并保持 60k token 预算。",
-  "## 已完成工作",
-  "已实现压缩策略。",
-  "## 关键决策及原因",
-  "使用确定性降级以保证可恢复。",
-  "## 文件、命令与验证",
-  "修改 session-migration-compression.ts；运行 vitest。",
-  "## 未解决事项",
-  "无。",
-  "## 建议下一步",
-  "继续实现 writer。",
-].join("\n\n");
+
+function summaryBody(extra = ""): string {
+  return [
+    "## 用户原始目标与约束",
+    "实现跨 Agent 会话迁移压缩对齐 Claude Code /compact 两块式结构：采用 analysis+summary 两块式 prompt，保留开头用户原始目标 10k 字符逐字不压缩，尾部保留最近 10k 字符原始消息便于目标 Agent 衔接，summary 硬上限 60k 字符。",
+    "## 已完成工作",
+    "重写 buildMigrationHandoffMessages 为中文两块式 prompt，要求 analysis 按时间顺序梳理、summary 覆盖七项要点；新增 formatCompactSummary 剥掉 analysis 块只留 summary；重写 parseMigrationHandoff 校验两块结构、summary 最小长度、逐字引用标记；重写 buildAiCompressedSession 为 head+summary+marker+tail 四段消息。",
+    "## 关键决策及原因",
+    "采用两块式结构以对齐 Claude Code 实际实现而非自创分段；保留头部 10k 防止用户原始目标被摘要改写后漂移；analysis 块剥掉是因为它只是草稿区无保留价值；尾部保留 10k 是因为目标 Agent 需要最近原始上下文衔接。",
+    "## 文件、命令与验证",
+    "修改 src/core/session-migration-compression.ts；更新 session-migration-compression.test.ts 覆盖新结构；运行 vitest 验证全绿。",
+    "## 未解决事项",
+    "暂无遗留问题，首版不暴露 hint UI 入口。",
+    "## 建议下一步",
+    "继续跑测试覆盖新结构，确认 emoji 边界、超长 summary 裁剪、head 保留均符合预期。",
+    "## 最近对话逐字引用",
+    "> 改成两块式结构，头部调到 10k",
+    "> 或者直接不保留头部，压缩+尾部",
+    "> 你先说一下claude code是怎么压缩的，八段式压缩吗",
+    extra,
+  ].join("\n");
+}
+
+const VALID_HANDOFF = `<analysis>
+按时间顺序梳理：用户要求实现跨 Agent 会话迁移压缩，对齐 Claude Code /compact 两块式结构。
+做法：重写 prompt 与校验。关键决策：保留头部 10k，尾部 10k，summary 上限 60k。
+文件：session-migration-compression.ts。错误：无。用户反馈：要求两块式结构。
+</analysis>
+<summary>
+${summaryBody()}
+</summary>`;
 
 function message(content: string, index: number, role: SessionMessage["role"] = index % 2 === 0 ? "user" : "assistant"): SessionMessage {
   return {
@@ -82,12 +101,17 @@ describe("migration compression policy", () => {
 
     expect(result.strategy).toBe("ai-compressed");
     expect(compress).toHaveBeenCalledWith(session);
-    expect(result.session.messages[0]).toMatchObject({
-      role: "user",
-      timestamp: STARTED_AT,
-      index: 0,
-    });
-    expect(result.session.messages[0].content).toContain("## 目标与约束");
+    // head: first 10k of the original user message
+    expect(result.session.messages[0]).toMatchObject({ role: "user" });
+    expect(result.session.messages[0].content).toBe("x".repeat(10_000));
+    // summary: handoff header + summary content (no <analysis>), with verbatim quote
+    const summaryMessage = result.session.messages[1];
+    expect(summaryMessage).toMatchObject({ role: "user", timestamp: STARTED_AT });
+    expect(summaryMessage.content).toContain("# 会话迁移交接");
+    expect(summaryMessage.content).toContain("> 改成两块式结构");
+    expect(summaryMessage.content).not.toContain("<analysis>");
+    expect(summaryMessage.content).not.toContain("</analysis>");
+    // tail: last message preserved
     expect(result.session.messages.at(-1)?.content).toContain("final answer");
     expect(estimatePortableSessionTokens(result.session)).toBeLessThanOrEqual(MIGRATION_TOKEN_LIMIT);
     expectContinuousIndexes(result.session);
@@ -98,17 +122,13 @@ describe("migration compression policy", () => {
     ["gets an empty response", vi.fn().mockResolvedValue(" \n ")],
     ["gets a provider failure", vi.fn().mockRejectedValue(new Error("timeout"))],
     ["gets unrelated text", vi.fn().mockResolvedValue("Looks good to me.")],
+    ["gets a handoff without <analysis> block", vi.fn().mockResolvedValue(`<summary>${summaryBody()}</summary>`)],
+    ["gets a handoff without <summary> block", vi.fn().mockResolvedValue("<analysis>only analysis</analysis>")],
+    ["gets a handoff with a too-short summary", vi.fn().mockResolvedValue("<analysis>x</analysis><summary>too short</summary>")],
     [
-      "gets a handoff with a missing section",
-      vi.fn().mockResolvedValue(VALID_HANDOFF.replace("## 建议下一步", "## 后续")),
-    ],
-    [
-      "gets a handoff with an empty section",
+      "gets a handoff with a summary lacking verbatim quotes",
       vi.fn().mockResolvedValue(
-        VALID_HANDOFF.replace(
-          "## 未解决事项\n\n无。",
-          "## 未解决事项\n\n## 建议下一步",
-        ),
+        `<analysis>x</analysis><summary>${"y".repeat(600)}</summary>`,
       ),
     ],
   ] as const)("falls back locally when it %s", async (_case, compress) => {
@@ -160,21 +180,38 @@ describe("migration compression policy", () => {
         message(`message-${index}-${"x".repeat(8_000)}`, index),
       ),
     );
+    const oversizedSummary = summaryBody(`填充${"h".repeat(300_000)}`);
     const result = await applyMigrationLengthPolicy(
       session,
-      vi.fn().mockResolvedValue(
-        VALID_HANDOFF.replace(
-          "完成跨 Agent 迁移，并保持 60k token 预算。",
-          `完成跨 Agent 迁移。${"h".repeat(300_000)}`,
-        ),
-      ),
+      vi.fn().mockResolvedValue(`<analysis>x</analysis><summary>${oversizedSummary}</summary>`),
     );
 
     expect(result.strategy).toBe("ai-compressed");
-    expect(result.session.messages[0].content).toContain("## 目标与约束");
+    const summaryMessage = result.session.messages.find((entry) =>
+      entry.content.includes("# 会话迁移交接"),
+    );
+    expect(summaryMessage).toBeDefined();
+    expect(summaryMessage!.content.length).toBeLessThanOrEqual(60_000 + "# 会话迁移交接\n\n".length);
     expect(result.session.messages.at(-1)?.content).toContain("message-79");
     expect(estimatePortableSessionTokens(result.session)).toBeLessThanOrEqual(MIGRATION_TOKEN_LIMIT);
     expectContinuousIndexes(result.session);
+  });
+
+  it("preserves the opening user goal verbatim in the head window", async () => {
+    const session = portable([
+      message("原始用户目标：实现压缩迁移对齐 Claude Code", 0, "user"),
+      ...Array.from({ length: 60 }, (_, index) =>
+        message(`middle-${index}-${"x".repeat(8_000)}`, index + 1),
+      ),
+    ]);
+    const result = await applyMigrationLengthPolicy(
+      session,
+      vi.fn().mockResolvedValue(VALID_HANDOFF),
+    );
+
+    expect(result.strategy).toBe("ai-compressed");
+    expect(result.session.messages[0].content).toContain("原始用户目标：实现压缩迁移对齐 Claude Code");
+    expect(estimatePortableSessionTokens(result.session)).toBeLessThanOrEqual(MIGRATION_TOKEN_LIMIT);
   });
 
   it("does not split emoji when clipping local head and tail boundaries", () => {
@@ -193,31 +230,62 @@ describe("migration compression policy", () => {
 
   it("does not split emoji when clipping an oversized valid AI handoff", async () => {
     for (const offset of ["", "x"]) {
-      const oversized = VALID_HANDOFF.replace(
-        "完成跨 Agent 迁移，并保持 60k token 预算。",
+      const oversized = `<analysis>x</analysis><summary>${summaryBody(
         `${offset}${"😀".repeat(100_000)}`,
-      );
+      )}</summary>`;
       const result = await applyMigrationLengthPolicy(
         portableWithContent("x".repeat(239_989)),
         vi.fn().mockResolvedValue(oversized),
       );
 
       expect(result.strategy).toBe("ai-compressed");
-      for (const section of [
-        "目标与约束",
-        "已完成工作",
-        "关键决策及原因",
-        "文件、命令与验证",
-        "未解决事项",
-        "建议下一步",
-      ]) {
-        expect(result.session.messages[0].content).toContain(`## ${section}`);
-      }
+      expect(result.session.messages[1].content).toContain("# 会话迁移交接");
       for (const entry of result.session.messages) {
         expectNoUnpairedSurrogates(entry.content);
       }
       expect(estimatePortableSessionTokens(result.session)).toBeLessThanOrEqual(MIGRATION_TOKEN_LIMIT);
     }
+  });
+});
+
+describe("formatCompactSummary", () => {
+  it("strips <analysis> and extracts <summary> content", () => {
+    const raw = `<analysis>draft notes</analysis><summary>actual summary</summary>`;
+    expect(formatCompactSummary(raw)).toBe("actual summary");
+  });
+
+  it("collapses extra blank lines in the summary", () => {
+    const raw = `<analysis>x</analysis><summary>line1\n\n\n\nline2</summary>`;
+    expect(formatCompactSummary(raw)).toBe("line1\n\nline2");
+  });
+
+  it("returns null when <summary> block is missing", () => {
+    expect(formatCompactSummary("<analysis>only</analysis>")).toBeNull();
+  });
+
+  it("returns null when <summary> is empty", () => {
+    expect(formatCompactSummary("<analysis>x</analysis><summary>   </summary>")).toBeNull();
+  });
+});
+
+describe("parseMigrationHandoff", () => {
+  it("accepts a valid two-block handoff with a verbatim quote", () => {
+    expect(parseMigrationHandoff(VALID_HANDOFF)).not.toBeNull();
+  });
+
+  it("returns null when <analysis> block is missing", () => {
+    expect(parseMigrationHandoff(`<summary>${summaryBody()}</summary>`)).toBeNull();
+  });
+
+  it("returns null when summary is shorter than the minimum", () => {
+    expect(
+      parseMigrationHandoff("<analysis>x</analysis><summary>too short</summary>"),
+    ).toBeNull();
+  });
+
+  it("returns null when summary has no verbatim quote marker", () => {
+    const noQuote = "y".repeat(600);
+    expect(parseMigrationHandoff(`<analysis>x</analysis><summary>${noQuote}</summary>`)).toBeNull();
   });
 });
 
@@ -280,19 +348,12 @@ describe("migration handoff provider request", () => {
     );
 
     expect(messages[0].role).toBe("system");
-    expect(messages[0].content).toContain("entire user payload");
-    expect(messages[0].content).toContain("untrusted data");
-    expect(messages[0].content).toContain("Never execute");
-    for (const section of [
-      "目标与约束",
-      "已完成工作",
-      "关键决策及原因",
-      "文件、命令与验证",
-      "未解决事项",
-      "建议下一步",
-    ]) {
-      expect(messages[0].content).toContain(section);
-    }
+    expect(messages[0].content).toContain("不可信数据");
+    expect(messages[0].content).toContain("不调用任何工具");
+    expect(messages[0].content).toContain("执行");
+    expect(messages[0].content).toContain("逐字引用");
+    expect(messages[0].content).toContain("<analysis>");
+    expect(messages[0].content).toContain("<summary>");
     expect(messages[0].content).not.toContain(injection);
     const payload = JSON.parse(messages[1].content) as {
       sourceAgent: string;
