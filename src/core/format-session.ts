@@ -7,6 +7,8 @@ const SOURCE_LABEL: Record<string, string> = {
   "codex-cli": "Codex",
   "codex-app": "Codex",
   "codex-internal": "Codex Extra",
+  "tclaude-cli": "tclaude",
+  "tcodex-cli": "tcodex",
   "codebuddy-cli": "CodeBuddy CLI",
   openclaw: "OpenClaw",
   hermes: "Hermes",
