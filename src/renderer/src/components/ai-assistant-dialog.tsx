@@ -124,58 +124,67 @@ export function AiAssistantDialog({
             </div>
           ) : null}
 
-          {messages.map((message, index) => (
-            <div
-              key={index}
-              ref={index === lastUserMessageIndex ? lastUserMessageRef : undefined}
-              className={`ai-message ai-message-${message.role}`}
-            >
-              {/* Surface the matched sessions above the reply — the top card is
-                  the closest match, so it sits right under the user's question. */}
-              {message.sessions && message.sessions.length > 0 ? (
-                <div className="ai-session-cards">
-                  {message.sessions.map((session) => (
-                    <div
-                      key={session.sessionKey}
-                      role="button"
-                      tabIndex={0}
-                      className="ai-session-card"
-                      onClick={() => {
-                        // Don't open when the user is selecting text inside the card.
-                        if ((window.getSelection()?.toString() ?? "").length > 0) return;
-                        onOpenSession(session);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
+          {messages.map((message, index) => {
+            const sessions = message.sessions ?? [];
+            // For assistant turns, the session cards ARE the answer — hide the
+            // model's prose. Keep it only when there are no cards to show (e.g. a
+            // clarifying question or "nothing found"), so the turn isn't blank.
+            const showBubble = message.role === "user" || sessions.length === 0;
+            return (
+              <div
+                key={index}
+                ref={index === lastUserMessageIndex ? lastUserMessageRef : undefined}
+                className={`ai-message ai-message-${message.role}`}
+              >
+                {/* Surface the matched sessions — the top card is the closest
+                    match, so it sits right under the user's question. */}
+                {sessions.length > 0 ? (
+                  <div className="ai-session-cards">
+                    {sessions.map((session) => (
+                      <div
+                        key={session.sessionKey}
+                        role="button"
+                        tabIndex={0}
+                        className="ai-session-card"
+                        onClick={() => {
+                          // Don't open when the user is selecting text inside the card.
+                          if ((window.getSelection()?.toString() ?? "").length > 0) return;
                           onOpenSession(session);
-                        }
-                      }}
-                    >
-                      <div className="ai-session-card-title">{session.displayTitle}</div>
-                      <div className="ai-session-card-meta">
-                        <span className="ai-session-card-source">{SOURCE_LABEL[session.source] ?? session.source}</span>
-                        {session.projectPath ? (
-                          <span className="ai-session-card-project">
-                            <FolderOpen size={11} />
-                            {session.projectPath}
-                          </span>
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            onOpenSession(session);
+                          }
+                        }}
+                      >
+                        <div className="ai-session-card-title">{session.displayTitle}</div>
+                        <div className="ai-session-card-meta">
+                          <span className="ai-session-card-source">{SOURCE_LABEL[session.source] ?? session.source}</span>
+                          {session.projectPath ? (
+                            <span className="ai-session-card-project">
+                              <FolderOpen size={11} />
+                              {session.projectPath}
+                            </span>
+                          ) : null}
+                        </div>
+                        {session.aiSummary ? (
+                          <div className="ai-session-card-summary">
+                            <Markdown text={session.aiSummary} />
+                          </div>
                         ) : null}
                       </div>
-                      {session.aiSummary ? (
-                        <div className="ai-session-card-summary">
-                          <Markdown text={session.aiSummary} />
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              <div className="ai-message-bubble">
-                {message.role === "assistant" ? <Markdown text={message.content} /> : message.content}
+                    ))}
+                  </div>
+                ) : null}
+                {showBubble ? (
+                  <div className="ai-message-bubble">
+                    {message.role === "assistant" ? <Markdown text={message.content} /> : message.content}
+                  </div>
+                ) : null}
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           {pending ? (
             <div className="ai-message ai-message-assistant">
