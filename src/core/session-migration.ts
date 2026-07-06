@@ -1,4 +1,8 @@
-import type { PreparedMigrationSession } from "./session-migration-compression";
+import {
+  migrationCompressionPercent,
+  type MigrationCompressionListener,
+  type PreparedMigrationSession,
+} from "./session-migration-compression";
 import type { WrittenMigratedSession } from "./session-migration-writers";
 import type {
   MigrationAgent,
@@ -17,7 +21,10 @@ const MIGRATION_AGENTS = ["claude", "codex", "codebuddy"] as const;
 
 export interface SessionMigrationDependencies {
   inspectCli: (target: MigrationAgent) => Promise<void> | void;
-  prepare: (session: PortableSession) => Promise<PreparedMigrationSession>;
+  prepare: (
+    session: PortableSession,
+    onProgress?: MigrationCompressionListener,
+  ) => Promise<PreparedMigrationSession>;
   write: (
     target: MigrationAgent,
     session: PortableSession,
@@ -139,10 +146,26 @@ export async function migrateSession({
       sessionKey: source.sessionKey,
       target,
       stage: "compressing",
+      percent: 0,
     });
   }
 
-  const prepared = await deps.prepare(portable);
+  // Lift the compressor's granular events into SessionMigrationProgress so the
+  // UI can render a percentage bar during the (slow, multi-call) compression.
+  const migrationOnProgress = deps.onProgress;
+  const compressionListener: MigrationCompressionListener | undefined = migrationOnProgress
+    ? (event) => {
+        notifyProgress(migrationOnProgress, {
+          sessionKey: source.sessionKey,
+          target,
+          stage: "compressing",
+          percent: migrationCompressionPercent(event),
+          compression: event,
+        });
+      }
+    : undefined;
+
+  const prepared = await deps.prepare(portable, compressionListener);
 
   notifyProgress(deps.onProgress, {
     sessionKey: source.sessionKey,

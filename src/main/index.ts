@@ -386,7 +386,7 @@ async function restoreRemoteSession(
     localProjectPath,
     deps: {
       inspectCli: (migrationTarget) => inspectMigrationCli(migrationTarget, getSettings()),
-      prepare: (session) => applyMigrationLengthPolicy(session, compressor),
+      prepare: (session, onProgress) => applyMigrationLengthPolicy(session, compressor, onProgress),
       write: (migrationTarget, session) => writeMigratedSession({ target: migrationTarget, session }),
       record: (record) => store.recordSessionMigration(record),
       refreshIndex: async (migrationTarget, writtenFilePath) => {
@@ -1647,7 +1647,7 @@ function registerIpc(): void {
       target,
       deps: {
         inspectCli: (migrationTarget) => inspectMigrationCli(migrationTarget, getSettings()),
-        prepare: (portable) => applyMigrationLengthPolicy(portable, compressor),
+        prepare: (portable, onProgress) => applyMigrationLengthPolicy(portable, compressor, onProgress),
         write: (migrationTarget, portable) => writeMigratedSession({ target: migrationTarget, session: portable }),
         record: (record) => store.recordSessionMigration(record),
         refreshIndex: async (migrationTarget, writtenFilePath) => {

@@ -9,12 +9,18 @@ import {
   MIGRATION_TOKEN_LIMIT,
 } from "./session-migration";
 import type {
+  MigrationCompressionEvent,
   PortableSession,
   SessionMessage,
   SessionMigrationStrategy,
 } from "./types";
 
-export type MigrationCompressFn = (session: PortableSession) => Promise<string>;
+export type MigrationCompressionListener = (event: MigrationCompressionEvent) => void;
+
+export type MigrationCompressFn = (
+  session: PortableSession,
+  onProgress?: MigrationCompressionListener,
+) => Promise<string>;
 
 export interface PreparedMigrationSession {
   session: PortableSession;
@@ -277,9 +283,22 @@ function buildAiCompressedSession(
   };
 }
 
+// Map a compression event to a 0-100 percent. Total work units =
+// totalChunks (chunk summaries) + 1 (final handoff). A "chunk" event fires
+// after chunk `chunkIndex` is summarized (done = chunkIndex + 1); a "handoff"
+// event fires once the final handoff call begins (all chunks done, handoff in
+// flight, so done = totalChunks — the bar tops just below 100% until the
+// compressor returns and the orchestrator moves to the "writing" stage).
+export function migrationCompressionPercent(event: MigrationCompressionEvent): number {
+  const totalUnits = event.totalChunks + 1;
+  const done = event.phase === "handoff" ? event.totalChunks : event.chunkIndex + 1;
+  return Math.max(0, Math.min(100, Math.round((done / totalUnits) * 100)));
+}
+
 export async function applyMigrationLengthPolicy(
   session: PortableSession,
   compress: MigrationCompressFn | null,
+  onProgress?: MigrationCompressionListener,
 ): Promise<PreparedMigrationSession> {
   if (estimatePortableSessionTokens(session) <= MIGRATION_TOKEN_LIMIT) {
     return { session, strategy: "complete" };
@@ -287,7 +306,9 @@ export async function applyMigrationLengthPolicy(
 
   if (compress) {
     try {
-      const raw = (await compress(session)).trim();
+      // Forward onProgress only when provided, so callers (and tests) that
+      // pass a plain (session) => Promise<string> fn see exactly that arity.
+      const raw = (await (onProgress ? compress(session, onProgress) : compress(session))).trim();
       const summary = parseMigrationHandoff(raw);
       if (summary) {
         return {
@@ -480,9 +501,12 @@ export function createMigrationCompressor(
   endpoint: SummaryEndpoint,
   chat: ChatCompletionFn = requestSummaryCompletion,
 ): MigrationCompressFn {
-  return async (session) => {
+  return async (session, onProgress) => {
     const chunks = transcriptChunks(session);
+    const totalChunks = Math.max(1, chunks.length);
+
     if (chunks.length <= 1) {
+      onProgress?.({ chunkIndex: 0, totalChunks, phase: "handoff" });
       return chat(endpoint, buildMigrationHandoffMessages(session));
     }
 
@@ -493,7 +517,9 @@ export function createMigrationCompressor(
         buildMigrationChunkSummaryMessages(session, chunks[index], index, chunks.length),
       );
       chunkSummaries.push(safePrefix(summary.trim(), CHUNK_SUMMARY_MAX_CHARACTERS));
+      onProgress?.({ chunkIndex: index, totalChunks, phase: "chunk" });
     }
+    onProgress?.({ chunkIndex: chunks.length - 1, totalChunks, phase: "handoff" });
     return chat(endpoint, buildMigrationHandoffMessagesFromChunkSummaries(session, chunkSummaries));
   };
 }
