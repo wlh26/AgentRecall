@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Clipboard,
   Cloud,
+  CloudUpload,
   Code2,
   Copy,
   Download,
@@ -669,6 +670,47 @@ export function App(): ReactElement {
     [loadSkills, t],
   );
 
+  const uploadVisibleSkillsToSync = useCallback(
+    async (skills: InstalledSkill[]): Promise<void> => {
+      const uploadable = skills.filter((skill) => skill.source !== "codex-system");
+      if (uploadable.length === 0) {
+        setSkillsFeedback({ kind: "error", message: t("No visible non-system skills to upload.", "没有可上传的非系统 Skill。") });
+        return;
+      }
+
+      setSkillsLoading(true);
+      setSkillsFeedback({ kind: "running", message: t(`Uploading ${uploadable.length} visible skills...`, `正在上传 ${uploadable.length} 个当前可见 Skill...`) });
+      let uploaded = 0;
+      let skipped = 0;
+      let conflicts = 0;
+      let failed = 0;
+      try {
+        for (const skill of uploadable) {
+          try {
+            const result = await window.sessionSearch.uploadSkillToSync(skill.path, false);
+            if (result.status === "uploaded") uploaded += 1;
+            else if (result.status === "skipped") skipped += 1;
+            else conflicts += 1;
+          } catch {
+            failed += 1;
+          }
+        }
+        await loadSkills({ silent: true });
+        const message = t(
+          `Visible skills upload finished: ${uploaded} uploaded, ${skipped} skipped, ${conflicts} need confirmation, ${failed} failed.`,
+          `当前可见 Skills 上传完成：${uploaded} 个已上传，${skipped} 个已跳过，${conflicts} 个需要确认，${failed} 个失败。`,
+        );
+        setSkillsFeedback({ kind: failed > 0 ? "error" : "success", message });
+        window.setTimeout(() => {
+          setSkillsFeedback((current) => (current?.message === message ? null : current));
+        }, 4200);
+      } finally {
+        setSkillsLoading(false);
+      }
+    },
+    [loadSkills, t],
+  );
+
   const installSyncedSkill = useCallback(async (remoteSkillId: string) => {
     setSkillsLoading(true);
     setSkillsFeedback({ kind: "running", message: t("Installing remote skill...", "正在安装远程 Skill...") });
@@ -1235,6 +1277,39 @@ export function App(): ReactElement {
     );
   }
 
+  async function uploadVisibleRemoteSessions(): Promise<void> {
+    const uploadable = displayedResults.filter((session) => supportsMigrationSource(session.source));
+    if (uploadable.length === 0) {
+      setActionStatus({ kind: "error", message: t("No visible sessions can be saved to remote.", "当前没有可保存到远程的可见会话。") });
+      return;
+    }
+
+    setActionStatus({ kind: "running", message: t(`Saving ${uploadable.length} visible sessions to remote...`, `正在保存 ${uploadable.length} 个当前可见会话到远程...`) });
+    let uploaded = 0;
+    let updated = 0;
+    let skipped = 0;
+    let failed = 0;
+    for (const session of uploadable) {
+      try {
+        const result = await window.sessionSearch.uploadRemoteSession(session.sessionKey);
+        if (result.status === "uploaded") uploaded += 1;
+        else if (result.status === "updated") updated += 1;
+        else skipped += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+
+    const message = t(
+      `Remote save finished: ${uploaded} uploaded, ${updated} updated, ${skipped} skipped, ${failed} failed.`,
+      `远程保存完成：${uploaded} 个已上传，${updated} 个已更新，${skipped} 个已跳过，${failed} 个失败。`,
+    );
+    setActionStatus({ kind: failed > 0 ? "error" : "success", message });
+    window.setTimeout(() => {
+      setActionStatus((current) => (current?.message === message ? null : current));
+    }, 4200);
+  }
+
   async function exportMarkdown(sessionKey: string): Promise<void> {
     setContextMenu(null);
     setActionStatus({ kind: "running", message: t("Exporting markdown...", "正在导出 Markdown...") });
@@ -1789,6 +1864,15 @@ export function App(): ReactElement {
               <Cloud size={15} />
             </button>
             <button
+              className="icon-button toolbar-icon-button"
+              onClick={() => void uploadVisibleRemoteSessions()}
+              disabled={actionStatus?.kind === "running" || !displayedResults.some((session) => supportsMigrationSource(session.source))}
+              title={t("Save visible to remote", "保存当前可见到远程")}
+              aria-label={t("Save visible to remote", "保存当前可见到远程")}
+            >
+              <CloudUpload size={15} />
+            </button>
+            <button
               className={`icon-button toolbar-icon-button ${apiConfigOpen ? "active" : ""}`}
               onClick={() => {
                 setSkillsOpen(false);
@@ -2122,6 +2206,7 @@ export function App(): ReactElement {
           revealLabel={FILE_MANAGER_LABEL}
           onRefresh={() => void loadSkills({ refreshUsage: true })}
           onUpload={(skill, force) => uploadSkillToSync(skill, force)}
+          onUploadVisible={(skills) => uploadVisibleSkillsToSync(skills)}
           onInstallRemote={(remoteSkillId) => installSyncedSkill(remoteSkillId)}
           onFetchVersion={(remoteSkillId) => fetchSyncedSkillVersion(remoteSkillId)}
           onRefreshRemote={() => void loadSkills({ silent: true })}

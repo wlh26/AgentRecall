@@ -18,6 +18,7 @@ export function SkillsDialog({
   revealLabel,
   onRefresh,
   onUpload,
+  onUploadVisible,
   onInstallRemote,
   onFetchVersion,
   onRefreshRemote,
@@ -35,6 +36,7 @@ export function SkillsDialog({
   revealLabel: string;
   onRefresh: () => void;
   onUpload: (skill: InstalledSkill, force?: boolean) => Promise<SkillSyncUploadOutcome | null>;
+  onUploadVisible: (skills: InstalledSkill[]) => Promise<void>;
   onInstallRemote: (remoteSkillId: string) => Promise<void>;
   onFetchVersion: (remoteSkillId: string) => Promise<RemoteSkill>;
   onRefreshRemote: () => void;
@@ -77,6 +79,7 @@ export function SkillsDialog({
     selectedGroup?.versions.find((version) => version.id === selectedVersionId) ?? selectedGroup?.latest ?? null;
   const selectedSkillBinding = selectedSkill ? syncSnapshot.bindings.find((binding) => binding.localSkillPath === selectedSkill.path) : null;
   const selectedGroupBinding = selectedGroup ? bindingForGroup(syncSnapshot, selectedGroup) : null;
+  const uploadableVisibleSkills = filteredSkills.filter((skill) => skill.source !== "codex-system");
   const syncReady = syncSnapshot.status.kind === "ready";
   const codexCount = snapshot.skills.filter((skill) => skill.agent === "codex").length;
   const claudeCount = snapshot.skills.filter((skill) => skill.agent === "claude").length;
@@ -235,6 +238,18 @@ export function SkillsDialog({
               <option value="usage-asc">{l("Least used", "最少使用")}</option>
             </select>
           </label> : null}
+          {syncView === "local" ? (
+            <button
+              type="button"
+              className="settings-action-button"
+              onClick={() => void onUploadVisible(uploadableVisibleSkills)}
+              disabled={!syncReady || loading || uploadableVisibleSkills.length === 0}
+              title={!syncReady ? syncDisabledTitle(syncSnapshot, language) : l("Upload visible non-system skills", "上传当前可见的非系统 Skills")}
+            >
+              <Upload size={13} />
+              <span>{l("Upload visible", "上传当前可见")}</span>
+            </button>
+          ) : null}
           <button className="stats-refresh" onClick={syncView === "local" ? onRefresh : onRefreshRemote} disabled={loading} title={l("Refresh skills", "刷新 Skills")} aria-label={l("Refresh skills", "刷新 Skills")}>
             <RefreshCw size={13} />
           </button>

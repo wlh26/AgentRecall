@@ -306,7 +306,7 @@ export function DetailPanel({
           </button>
           {onUploadRemote ? (
             <button onClick={onUploadRemote} disabled={actionRunning}>
-              <CloudUpload size={15} /> {l("Upload", "上传")}
+              <CloudUpload size={15} /> {l("Save to Remote", "保存到远程")}
             </button>
           ) : null}
           {canResume ? (
