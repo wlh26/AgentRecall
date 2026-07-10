@@ -1,8 +1,10 @@
 import type { MigrationCompressionListener, PreparedMigrationSession } from "./session-migration-compression";
+import { BASE_MIGRATION_TARGETS } from "./migration-targets";
 import type { WrittenMigratedSession } from "./session-migration-writers";
 import type {
   MigrationAgent,
   MigrationCompressionEvent,
+  MigrationTarget,
   PortableSession,
   SessionMessage,
   SessionMigrationProgress,
@@ -13,8 +15,6 @@ import type {
 } from "./types";
 
 export const MIGRATION_TOKEN_LIMIT = 60_000;
-
-const MIGRATION_AGENTS = ["claude", "codex", "codebuddy"] as const;
 
 export interface SessionMigrationDependencies {
   inspectCli: (target: MigrationAgent) => Promise<void> | void;
@@ -62,10 +62,12 @@ export function migrationAgentForSource(source: SessionSource): MigrationAgent |
     case "claude-cli":
     case "claude-app":
     case "claude-internal":
+    case "tclaude-cli":
       return "claude";
     case "codex-cli":
     case "codex-app":
     case "codex-internal":
+    case "tcodex-cli":
       return "codex";
     case "codebuddy-cli":
       return "codebuddy";
@@ -74,9 +76,16 @@ export function migrationAgentForSource(source: SessionSource): MigrationAgent |
   }
 }
 
-export function supportedMigrationTargets(source: SessionSource): MigrationAgent[] {
-  const sourceAgent = migrationAgentForSource(source);
-  return sourceAgent ? [...MIGRATION_AGENTS] : [];
+export function supportedMigrationTargets(source: SessionSource): MigrationAgent[];
+export function supportedMigrationTargets<T extends MigrationTarget>(
+  source: SessionSource,
+  enabledTargets: readonly T[],
+): T[];
+export function supportedMigrationTargets(
+  source: SessionSource,
+  enabledTargets: readonly MigrationTarget[] = BASE_MIGRATION_TARGETS,
+): MigrationTarget[] {
+  return migrationAgentForSource(source) ? [...enabledTargets] : [];
 }
 
 export function portableSessionFrom(
@@ -256,7 +265,7 @@ async function validateMigrationRequest(
   if (source.environmentKind !== "local" || source.environmentId !== "local") {
     throw new Error("Remote session migration is not supported yet.");
   }
-  if (!MIGRATION_AGENTS.includes(target)) {
+  if (!BASE_MIGRATION_TARGETS.includes(target)) {
     throw new Error(`Migration target ${target} is not supported.`);
   }
 

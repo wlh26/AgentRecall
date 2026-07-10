@@ -9,7 +9,13 @@ import {
   type SessionMigrationDependencies,
 } from "./session-migration";
 import type { WrittenMigratedSession } from "./session-migration-writers";
-import type { SessionMessage, SessionSearchResult, SessionSource } from "./types";
+import type {
+  MigrationAgent,
+  MigrationTarget,
+  SessionMessage,
+  SessionSearchResult,
+  SessionSource,
+} from "./types";
 
 function session(
   source: SessionSource,
@@ -171,9 +177,11 @@ describe("session migration model", () => {
     ["claude-cli", "claude"],
     ["claude-app", "claude"],
     ["claude-internal", "claude"],
+    ["tclaude-cli", "claude"],
     ["codex-cli", "codex"],
     ["codex-app", "codex"],
     ["codex-internal", "codex"],
+    ["tcodex-cli", "codex"],
     ["codebuddy-cli", "codebuddy"],
     ["openclaw", null],
     ["hermes", null],
@@ -185,12 +193,38 @@ describe("session migration model", () => {
   });
 
   it.each([
-    ["claude-cli", ["claude", "codex", "codebuddy"]],
-    ["codex-app", ["claude", "codex", "codebuddy"]],
-    ["codebuddy-cli", ["claude", "codex", "codebuddy"]],
-    ["hermes", []],
-  ] as const)("returns ordered migration targets for %s", (source, expected) => {
-    expect(supportedMigrationTargets(source)).toEqual(expected);
+    "claude-cli",
+    "claude-app",
+    "claude-internal",
+    "tclaude-cli",
+    "codex-cli",
+    "codex-app",
+    "codex-internal",
+    "tcodex-cli",
+    "codebuddy-cli",
+  ] as const)("returns all enabled migration targets for %s", (source) => {
+    const enabledTargets = [
+      "claude",
+      "codex",
+      "codebuddy",
+      "tclaude",
+      "tcodex",
+      "claude-internal",
+      "codex-internal",
+    ] as const satisfies readonly MigrationTarget[];
+
+    expect(supportedMigrationTargets(source, enabledTargets)).toEqual(enabledTargets);
+  });
+
+  it("returns the base migration targets when enabled targets are omitted", () => {
+    const targets: MigrationAgent[] = supportedMigrationTargets("claude-cli");
+
+    expect(targets).toEqual(["claude", "codex", "codebuddy"]);
+  });
+
+  it("returns no migration targets for an unsupported source", () => {
+    expect(supportedMigrationTargets("hermes")).toEqual([]);
+    expect(supportedMigrationTargets("hermes", ["tclaude", "tcodex"] as const)).toEqual([]);
   });
 
   it("normalizes a local session and copies only user and assistant messages", () => {
