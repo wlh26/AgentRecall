@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 import { readSidebarSections, serializeSidebarSections, toggleSidebarSection } from "./sidebar-sections";
 
 describe("sidebar sections", () => {
-  it("defaults all collapsible sections to expanded", () => {
+  it("defaults views to collapsed while keeping the other sections expanded", () => {
     expect(readSidebarSections(null)).toEqual({
       environments: true,
       remaining: true,
       projects: true,
       sources: true,
       tags: true,
-      views: true,
+      views: false,
     });
   });
 
@@ -20,8 +20,9 @@ describe("sidebar sections", () => {
       projects: false,
       sources: true,
       tags: true,
-      views: true,
+      views: false,
     });
+    expect(readSidebarSections(JSON.stringify({ views: true })).views).toBe(true);
   });
 
   it("falls back to defaults for invalid persisted state", () => {
@@ -31,7 +32,7 @@ describe("sidebar sections", () => {
       projects: true,
       sources: true,
       tags: true,
-      views: true,
+      views: false,
     });
   });
 

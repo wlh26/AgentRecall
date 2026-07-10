@@ -16,9 +16,9 @@
 - Modify: `src/renderer/src/sidebar-sections.test.ts`
 - Modify: `src/renderer/src/sidebar-sections.ts`
 
-- [ ] Update the no-state, missing-field, and invalid-JSON test expectations from `views: true` to `views: false`; add an assertion that explicit `{ views: true }` remains true.
-- [ ] Run `npx vitest run src/renderer/src/sidebar-sections.test.ts` and confirm it fails because the current default is still true.
-- [ ] Change only `DEFAULT_SIDEBAR_SECTIONS.views` from `true` to `false`.
-- [ ] Re-run the focused test and confirm all sidebar-section tests pass.
-- [ ] Run `npm test && npm run build && git diff --check`, then scan the diff for sensitive or unrelated content.
-- [ ] Commit with `feat: collapse views section by default`.
+- [x] Update the no-state, missing-field, and invalid-JSON test expectations from `views: true` to `views: false`; add an assertion that explicit `{ views: true }` remains true.
+- [x] Run `npx vitest run src/renderer/src/sidebar-sections.test.ts` and confirm it fails because the current default is still true.
+- [x] Change only `DEFAULT_SIDEBAR_SECTIONS.views` from `true` to `false`.
+- [x] Re-run the focused test and confirm all sidebar-section tests pass.
+- [x] Run `npm test && npm run build && git diff --check`, then scan the diff for sensitive or unrelated content.
+- [x] Commit with `feat: collapse views section by default`.

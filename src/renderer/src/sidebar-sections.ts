@@ -8,7 +8,7 @@ export const DEFAULT_SIDEBAR_SECTIONS: SidebarSectionsState = {
   projects: true,
   sources: true,
   tags: true,
-  views: true,
+  views: false,
 };
 
 export function readSidebarSections(value: string | null): SidebarSectionsState {
