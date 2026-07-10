@@ -163,6 +163,8 @@ export interface IndexedSession {
   environmentId?: string;
   environmentKind?: EnvironmentKind;
   environmentLabel?: string;
+  isSubagent?: boolean;
+  parentSessionId?: string | null;
 }
 
 export interface LoadedSession {
@@ -316,6 +318,9 @@ export interface ClaudeConversationLine {
   timestamp?: string;
   cwd?: string;
   gitBranch?: string;
+  agentId?: string;
+  sessionId?: string;
+  isSidechain?: boolean;
   message?: {
     role: "user" | "assistant";
     content?:
@@ -353,6 +358,23 @@ export interface CodexConversationLine {
       repository_url?: string;
     };
     originator?: string;
+    session_id?: string;
+    forked_from_id?: string;
+    thread_source?: string;
+    parent_thread_id?: string;
+    source?:
+      | string
+      | {
+          subagent?: {
+            thread_spawn?: {
+              parent_thread_id?: string;
+              depth?: number;
+              agent_path?: string | null;
+              agent_nickname?: string;
+              agent_role?: string | null;
+            };
+          };
+        };
     name?: string;
     arguments?: unknown;
     call_id?: string;
