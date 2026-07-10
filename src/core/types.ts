@@ -83,6 +83,8 @@ export interface PortableSession {
   projectPath: string;
   startedAt: string;
   messages: SessionMessage[];
+  isSubagent?: boolean;
+  parentSessionId?: string | null;
 }
 
 export interface SessionMigrationProgress {
