@@ -83,13 +83,9 @@ else
 fi
 
 # ── 4. build output (out/) ─────────────────────────────────────
-if [ -f "out/main/index.js" ] && [ -f "out/renderer/index.html" ]; then
-  ok "Build output present (out/)"
-else
-  info "Building the app (npm run build) …"
-  npm run build || fail "npm run build failed"
-  ok "Build complete"
-fi
+info "Building the app (npm run build) …"
+npm run build || fail "npm run build failed"
+ok "Build complete"
 
 # ── 5. global command ──────────────────────────────────────────
 # The global binary is a symlink to this repo (npm install -g .).
