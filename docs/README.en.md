@@ -22,7 +22,7 @@
 ### Core Features
 
 - **Unified search and management for AI coding-agent sessions**:
-  Search, filter, inspect, organize, and quick launch Claude Code, Codex, and optional sessions from tclaude, tcodex, CodeBuddy, OpenClaw, Hermes, OpenCode, Cursor Agent, and Trae; add custom titles, tags, favorites, pinned state, and hidden state; local and SSH remote environments are supported without installing this app on the remote machine.
+  Search, filter, inspect, organize, and quick launch Claude Code, Codex, and optional sessions from tclaude, tcodex, CodeBuddy, OpenClaw, Hermes, OpenCode, Cursor Agent, and Trae; add custom titles, tags, favorites, pinned state, and hidden state; local and SSH remote environments are supported without installing this app on the remote machine. Sidebar projects are grouped by environment, each group can be collapsed, and projects within a group are ordered by recent activity.
 - **Full session context view**:
   The detail view shows complete messages, tool calls, Markdown / code blocks, and supports AI summaries plus Markdown export.
 - **AI / Agent-assisted session retrieval**:
@@ -132,19 +132,37 @@ Supabase sync is designed for personal projects. It does not create tables autom
 
 ### macOS
 
-Requires Node.js 22.13+ (with npm). From the repository root, run these commands to install dependencies, build, and register the global command:
+Requires Node.js 22.13+ (with npm).
+
+#### One-command start (recommended)
+
+From the repository root, run:
 
 ```bash
-nvm install 22
-nvm use 22
-npm ci
-npm run build
-npm install -g .
+sh start.sh
+```
+
+The script checks the environment and fills in anything missing:
+
+1. Checks for Node.js 22.13 or newer and installs Node 22 through nvm when needed
+2. Runs `npm ci` when dependencies are missing
+3. Runs `npm run build` when build output is missing
+4. Runs `npm install -g .` when the global command is not registered
+5. Stops an existing instance and launches a fresh app instance
+
+The steps are idempotent, so requirements that are already satisfied are skipped and the script is safe to run again.
+
+#### Manual installation
+
+If you prefer to control each step manually, run:
+
+```bash
+nvm install 22 && nvm use 22 && npm ci && npm run build && npm install -g .
 ```
 
 If you do not use nvm, make sure `node --version` is 22.13 or newer, then start from `npm ci`.
 
-Once installed, run `agent-session-search` from any terminal to launch it. The app stays in the background (with a menu bar icon); press **⌥ Option + Space** by default to open the search window. If it conflicts with Raycast or another launcher, change or disable the global shortcut in Settings.
+Once installed, run `agent-session-search` from any terminal to launch it. The app stays in the background (with a menu bar icon); press **⌥ Option + Space** by default to open the search window. If it conflicts with Raycast or another launcher, change or disable the global shortcut in Settings. The app uses a single-instance lock, so launching it again focuses the existing window instead of opening another instance.
 
 Settings can also be opened with `Cmd+,`. Use Appearance to switch the color theme and English / Chinese UI.
 
@@ -218,3 +236,14 @@ npm run build
 - `README.md` is the Chinese project overview for users and developers.
 - `docs/README.en.md` is the English project overview.
 - `Install.md` covers install, update, and uninstall steps, plus a safe setup guide for Coding Agents.
+- `start.sh` is the macOS one-command launcher that checks the environment, installs missing dependencies, and starts the app.
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=zszz3%2Fagent-session-search&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=zszz3/agent-session-search&type=date&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=zszz3/agent-session-search&type=date&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=zszz3/agent-session-search&type=date&legend=top-left" />
+  </picture>
+</a>

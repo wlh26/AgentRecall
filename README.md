@@ -236,4 +236,14 @@ npm run build
 - `Install.md`：安装、更新、卸载说明，也包含给 Coding Agent 安全初始化项目环境的执行文档。
 - `start.sh`：macOS 一键启动脚本，自动检查环境、安装缺失依赖并启动应用。
 
+## Star History
+
+<a href="https://www.star-history.com/?repos=zszz3%2Fagent-session-search&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=zszz3/agent-session-search&type=date&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=zszz3/agent-session-search&type=date&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=zszz3/agent-session-search&type=date&legend=top-left" />
+  </picture>
+</a>
+
 有任何问题，请提交issue。如果觉得我们的项目还不错，欢迎star✨。
