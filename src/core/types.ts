@@ -189,6 +189,11 @@ export interface SearchOptions {
   dateFrom?: number;
   dateTo?: number;
   limit?: number;
+  excludeSubagents?: boolean;
+}
+
+export interface ProjectQueryOptions {
+  excludeSubagents?: boolean;
 }
 
 export interface ProjectSummary {
@@ -240,6 +245,7 @@ export type SessionStatsPeriod = "today" | "sevenDay" | "thirtyDay" | "allTime";
 
 export interface SessionStatsOptions {
   period?: SessionStatsPeriod;
+  excludeSubagents?: boolean;
 }
 
 export interface SessionStats {
