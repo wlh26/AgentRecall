@@ -476,6 +476,26 @@ export class SessionStore {
     return deleted;
   }
 
+  deleteSessionRecord(sessionKey: string): boolean {
+    let deleted = false;
+    this.transaction(() => {
+      const row = this.db.prepare("SELECT session_key FROM sessions WHERE session_key = ?").get(sessionKey);
+      if (!row) return;
+      this.db.prepare("DELETE FROM session_fts WHERE session_key = ?").run(sessionKey);
+      this.db.prepare("DELETE FROM sessions WHERE session_key = ?").run(sessionKey);
+      this.deleteUnusedTags();
+      deleted = true;
+    });
+    return deleted;
+  }
+
+  listSessionKeysByFilePath(environmentId: string, filePaths: ReadonlySet<string>): string[] {
+    const rows = this.db
+      .prepare("SELECT session_key, file_path FROM sessions WHERE environment_id = ? AND file_path != ''")
+      .all(environmentId) as Array<{ session_key: string; file_path: string }>;
+    return rows.filter((row) => !filePaths.has(row.file_path)).map((row) => row.session_key);
+  }
+
   markOpened(sessionKey: string): void {
     this.db.prepare("UPDATE sessions SET last_opened_at = ? WHERE session_key = ?").run(Date.now(), sessionKey);
   }
@@ -706,9 +726,8 @@ export class SessionStore {
       }))
       .sort(
         (a, b) =>
-          b.sessionCount - a.sessionCount ||
-          a.path.localeCompare(b.path) ||
           environmentSortValue(a.environmentId) - environmentSortValue(b.environmentId) ||
+          b.lastActivityAt - a.lastActivityAt ||
           a.label.localeCompare(b.label),
       );
   }

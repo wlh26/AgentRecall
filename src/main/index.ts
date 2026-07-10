@@ -1838,6 +1838,16 @@ function registerIpc(): void {
   });
 }
 
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    // second-instance can fire before whenReady resolves; defer to avoid
+    // creating a BrowserWindow before Electron is fully initialized.
+    app.whenReady().then(() => showWindow());
+  });
+}
+
 app.whenReady().then(() => {
   const dbPath = path.join(app.getPath("userData"), "session-search.sqlite");
   store = new SessionStore(dbPath);

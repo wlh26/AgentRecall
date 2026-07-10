@@ -282,6 +282,19 @@ function environmentTarget(environment: SessionEnvironment, language: LanguageMo
 }
 
 const SIDEBAR_SECTIONS_STORAGE_KEY = "agent-session-search-sidebar-sections";
+const COLLAPSED_PROJECT_GROUPS_STORAGE_KEY = "agent-session-search-collapsed-project-groups";
+
+function loadCollapsedProjectGroups(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(COLLAPSED_PROJECT_GROUPS_STORAGE_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? new Set(parsed.filter((v): v is string => typeof v === "string")) : new Set();
+  } catch {
+    return new Set();
+  }
+}
 
 export interface ResolvedSearchScope {
   environmentId: string | "all" | undefined;
@@ -377,6 +390,7 @@ export function App(): ReactElement {
   const [theme, setTheme] = useState<ThemeMode>(() => readInitialTheme());
   const [language, setLanguage] = useState<LanguageMode>(() => readInitialLanguage());
   const [sidebarSections, setSidebarSections] = useState<SidebarSectionsState>(() => loadInitialSidebarSections());
+  const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Set<string>>(() => loadCollapsedProjectGroups());
   const [query, setQuery] = useState("");
   const [source, setSource] = useState<SearchOptions["source"]>("all");
   const [environmentId, setEnvironmentId] = useState<string | "all">("all");
@@ -845,6 +859,19 @@ export function App(): ReactElement {
   }, [sidebarSections]);
 
   useEffect(() => {
+    window.localStorage.setItem(COLLAPSED_PROJECT_GROUPS_STORAGE_KEY, JSON.stringify([...collapsedProjectGroups]));
+  }, [collapsedProjectGroups]);
+
+  const toggleProjectGroup = useCallback((environmentId: string): void => {
+    setCollapsedProjectGroups((current) => {
+      const next = new Set(current);
+      if (next.has(environmentId)) next.delete(environmentId);
+      else next.add(environmentId);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
     const offIndex = window.sessionSearch.onIndexStatus((nextStatus) => {
       setIndexStatus(nextStatus);
       if (!nextStatus.running) {
@@ -1009,6 +1036,21 @@ export function App(): ReactElement {
     () => projects.find((project) => project.path === projectPath && project.environmentId === projectEnvironmentId) || null,
     [projects, projectPath, projectEnvironmentId],
   );
+  const groupedProjects = useMemo(() => {
+    const groups = new Map<string, { environment: SessionEnvironment | null; projects: ProjectSummary[] }>();
+    for (const project of projects) {
+      const environment = environments.find((env) => env.id === project.environmentId) ?? null;
+      const key = project.environmentId;
+      const group = groups.get(key);
+      if (group) group.projects.push(project);
+      else groups.set(key, { environment, projects: [project] });
+    }
+    return [...groups.values()].sort(
+      (a, b) =>
+        (a.environment ? 0 : 1) - (b.environment ? 0 : 1) ||
+        (a.environment?.label ?? "").localeCompare(b.environment?.label ?? ""),
+    );
+  }, [projects, environments]);
   const selectedEnvironment = useMemo(
     () => (environmentId === "all" ? null : environments.find((environment) => environment.id === environmentId) ?? null),
     [environmentId, environments],
@@ -1719,18 +1761,36 @@ export function App(): ReactElement {
             >
               {t("All Projects", "全部项目")}
             </button>
-            {projects.map((project) => (
-              <button
-                key={`${project.environmentId}:${project.path}`}
-                className={`project-row ${projectPath === project.path && projectEnvironmentId === project.environmentId ? "active" : ""}`}
-                onClick={() => selectProject(project)}
-                title={t(`${project.path} · ${project.sessionCount} sessions`, `${project.path} · ${project.sessionCount} 个会话`)}
-              >
-                <Folder size={13} />
-                <span>{project.label}</span>
-                <em>{formatRelativeTime(projectSortTimestamp(project, sortBy))}</em>
-              </button>
-            ))}
+            {groupedProjects.map((group) => {
+              const groupId = group.projects[0]?.environmentId ?? "unknown";
+              const collapsed = collapsedProjectGroups.has(groupId);
+              return (
+              <div key={groupId} className="project-group">
+                <button
+                  className="project-group-header"
+                  onClick={() => toggleProjectGroup(groupId)}
+                  aria-expanded={!collapsed}
+                >
+                  {group.environment?.kind === "local" ? <Laptop size={11} /> : group.environment?.kind === "ssh" ? <Server size={11} /> : null}
+                  <span>{group.environment?.label ?? t("Unknown", "未知")}</span>
+                  <em className="project-group-count">{group.projects.length}</em>
+                  {collapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+                </button>
+                {!collapsed && group.projects.map((project) => (
+                  <button
+                    key={`${project.environmentId}:${project.path}`}
+                    className={`project-row ${projectPath === project.path && projectEnvironmentId === project.environmentId ? "active" : ""}`}
+                    onClick={() => selectProject(project)}
+                    title={t(`${project.path} · ${project.sessionCount} sessions`, `${project.path} · ${project.sessionCount} 个会话`)}
+                  >
+                    <Folder size={13} />
+                    <span>{project.label}</span>
+                    <em>{formatRelativeTime(projectSortTimestamp(project, sortBy))}</em>
+                  </button>
+                ))}
+              </div>
+              );
+            })}
           </nav>
         ) : null}
 
