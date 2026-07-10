@@ -28,6 +28,7 @@ export function SessionMigrationDialog({
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const remote = isRemoteSession(session);
+  const availableTargets = remote ? [] : targets;
 
   return (
     <div className="dialog-backdrop" onMouseDown={onClose}>
@@ -44,8 +45,10 @@ export function SessionMigrationDialog({
         {remote ? <p className="dialog-copy danger-copy">{l("Remote session migration is not supported yet.", "首版仅支持本地会话迁移。")}</p> : null}
         {busy ? <MigrationProgressPanel progress={progress ?? null} language={language} /> : null}
         <div className="migration-targets">
-          {targets.map((target) => {
-            const disabled = busy || remote;
+          {availableTargets.length === 0 ? (
+            <p className="dialog-copy">{l("No migration targets are available for this session.", "当前会话没有可用的迁移目标。")}</p>
+          ) : availableTargets.map((target) => {
+            const disabled = busy;
             return (
               <button key={target} type="button" onClick={() => onSelect(target)} disabled={disabled}>
                 {migrationAgentLabel(target)}

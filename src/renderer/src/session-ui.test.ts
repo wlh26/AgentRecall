@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { defaultSettings } from "../../core/platform";
 import {
+  migrationTargetsForSession,
   migrationTargetsForSource,
   projectSortTimestamp,
   sessionSortTimestamp,
@@ -61,6 +62,23 @@ describe("session source labels", () => {
       includeCodexInternal: true,
     })).toEqual(["claude", "codex", "codebuddy", "tclaude", "tcodex", "claude-internal", "codex-internal"]);
     expect(migrationTargetsForSource("hermes", defaultSettings)).toEqual([]);
+  });
+
+  it("returns no dialog targets for remote sessions without changing local targets", () => {
+    const settings = {
+      ...defaultSettings,
+      includeTclaude: true,
+      includeTcodex: true,
+      includeClaudeInternal: true,
+      includeCodexInternal: true,
+    };
+    const local = { source: "claude-cli", environmentId: "local", environmentKind: "local" } as const;
+    const remote = { source: "claude-cli", environmentId: "ssh-dev", environmentKind: "ssh" } as const;
+
+    expect(migrationTargetsForSession(remote, settings)).toEqual([]);
+    expect(migrationTargetsForSession(local, settings)).toEqual([
+      "claude", "codex", "codebuddy", "tclaude", "tcodex", "claude-internal", "codex-internal",
+    ]);
   });
 
   it("uses the latest activity timestamp shown in session rows", () => {

@@ -133,7 +133,7 @@ import {
   supportsResumeSource,
   unsupportedMigrationTitle,
   migrationAgentLabel,
-  migrationTargetsForSource,
+  migrationTargetsForSession,
 } from "./session-ui";
 
 const STATS_PERIOD_OPTIONS: Array<{ label: string; value: SessionStatsPeriod }> = [
@@ -2150,7 +2150,7 @@ export function App(): ReactElement {
       {migrationDialog?.kind === "select" ? (
         <SessionMigrationDialog
           session={migrationDialog.session}
-          targets={migrationTargetsForSource(migrationDialog.session.source, appSettings ?? DEFAULT_MIGRATION_TARGET_SETTINGS)}
+          targets={migrationTargetsForSession(migrationDialog.session, appSettings ?? DEFAULT_MIGRATION_TARGET_SETTINGS)}
           language={language}
           busy={actionStatus?.kind === "running"}
           progress={migrationProgress}

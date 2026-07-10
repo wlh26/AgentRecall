@@ -68,6 +68,13 @@ export function migrationTargetsForSource(source: SessionSource, settings: Migra
   return supportedMigrationTargets(source, enabledMigrationTargets(settings));
 }
 
+export function migrationTargetsForSession(
+  session: Pick<SessionSearchResult, "source" | "environmentId" | "environmentKind">,
+  settings: MigrationTargetSettings,
+): MigrationTarget[] {
+  return isRemoteSession(session) ? [] : migrationTargetsForSource(session.source, settings);
+}
+
 export function migrationAgentLabel(target: MigrationTarget): string {
   return migrationTargetDescriptor(target).label;
 }
