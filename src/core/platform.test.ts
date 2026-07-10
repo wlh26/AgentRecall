@@ -71,6 +71,12 @@ function encodedCmdPowerShell(script: string): string {
   return `setlocal DisableDelayedExpansion & powershell.exe -NoLogo -NoProfile -EncodedCommand ${encoded} & endlocal`;
 }
 
+function decodeEncodedCmdPowerShell(command: string): string {
+  const encoded = command.match(/-EncodedCommand ([A-Za-z0-9+/=]+) & endlocal$/)?.[1];
+  if (!encoded) throw new Error(`Missing encoded PowerShell payload: ${command}`);
+  return Buffer.from(encoded, "base64").toString("utf16le");
+}
+
 describe("platform application resolution", () => {
   it("hides subagent sessions by default and preserves the default for older saved settings", () => {
     expect(defaultSettings.hideSubagentSessions).toBe(true);
@@ -779,6 +785,42 @@ describe("migration cli process specs", () => {
     expect(posix).toContain("CODEX_HOME=/home/me/.codex-internal");
     expect(powershell).toContain("try { $env:CODEX_HOME = 'C:\\Users\\me\\.codex-internal'");
     expect(cmd).toContain('setlocal & set "CODEX_HOME=C:\\Users\\me\\.codex-internal"');
+  });
+
+  it("encodes dangerous safe-fallback Cmd command, argv, and cwd values as literal PowerShell payload", () => {
+    const settings = {
+      ...defaultSettings,
+      defaultTerminal: "Cmd" as const,
+      codexBinary: "C:\\Tools\\%PATH%\\!TEMP!\\codex \"quoted\" &|<>^\r\n.exe",
+    };
+    const projectPath = "C:\\repo\\%PATH%\\!TEMP! &|<>^\"\r\nsource";
+    const sessionId = "id-%PATH%-!TEMP!-&|<>^\"\r\nnext";
+    const command = getSafeMigrationResumeCommand("codex", sessionId, projectPath, settings, { platform: "win32" });
+
+    expect(command).toMatch(/^setlocal DisableDelayedExpansion & powershell\.exe -NoLogo -NoProfile -EncodedCommand [A-Za-z0-9+/=]+ & endlocal$/);
+    expect(command).not.toContain("%PATH%");
+    expect(command).not.toContain("!TEMP!");
+    expect(decodeEncodedCmdPowerShell(command)).toBe(
+      "$ErrorActionPreference = 'Stop'; Set-Location -LiteralPath 'C:\\repo\\%PATH%\\!TEMP! &|<>^\"\r\nsource'; & 'C:\\Tools\\%PATH%\\!TEMP!\\codex \"quoted\" &|<>^\r\n.exe' 'resume' 'id-%PATH%-!TEMP!-&|<>^\"\r\nnext'",
+    );
+  });
+
+  it("encodes dangerous Codex Internal CODEX_HOME only inside the PowerShell child payload", () => {
+    const settings = {
+      ...defaultSettings,
+      defaultTerminal: "Cmd" as const,
+      codexBinary: "C:\\Tools\\codex.exe",
+    };
+    const command = getSafeMigrationResumeCommand("codex-internal", "id", "C:\\repo", settings, {
+      platform: "win32",
+      homeDir: "C:\\Users\\%PATH%\\!TEMP!\\\"quoted\" &|<>^\r\nme",
+    });
+
+    expect(command).toMatch(/^setlocal DisableDelayedExpansion & powershell\.exe -NoLogo -NoProfile -EncodedCommand [A-Za-z0-9+/=]+ & endlocal$/);
+    expect(command).not.toContain("CODEX_HOME=");
+    expect(decodeEncodedCmdPowerShell(command)).toBe(
+      "$ErrorActionPreference = 'Stop'; $env:CODEX_HOME = 'C:\\Users\\%PATH%\\!TEMP!\\\"quoted\" &|<>^\r\nme\\.codex-internal'; Set-Location -LiteralPath 'C:\\repo'; & 'C:\\Tools\\codex.exe' 'resume' 'id'",
+    );
   });
   it("maps each migration target to its configured binary", () => {
     const settings = {

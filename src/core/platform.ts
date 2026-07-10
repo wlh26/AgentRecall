@@ -690,6 +690,15 @@ export function getSafeMigrationResumeCommand(
     return `$__assHadCodexHome = Test-Path Env:CODEX_HOME; $__assCodexHome = $env:CODEX_HOME; try { $env:CODEX_HOME = ${safePowerShellMigrationToken(codexHome)}; ${located} } finally { if ($__assHadCodexHome) { $env:CODEX_HOME = $__assCodexHome } else { Remove-Item Env:CODEX_HOME -ErrorAction SilentlyContinue } }`;
   }
 
+  if ([command, ...args, projectPath, codexHome].some((value) => value != null && /[%!"\r\n&|<>^]/.test(value))) {
+    const statements = ["$ErrorActionPreference = 'Stop'"];
+    if (codexHome) statements.push(`$env:CODEX_HOME = ${safePowerShellMigrationToken(codexHome)}`);
+    if (projectPath) statements.push(`Set-Location -LiteralPath ${safePowerShellMigrationToken(projectPath)}`);
+    statements.push(`& ${[command, ...args].map(safePowerShellMigrationToken).join(" ")}`);
+    const encoded = Buffer.from(statements.join("; "), "utf16le").toString("base64");
+    return `setlocal DisableDelayedExpansion & powershell.exe -NoLogo -NoProfile -EncodedCommand ${encoded} & endlocal`;
+  }
+
   const invocation = [command, ...args].map(safeCmdMigrationToken).join(" ");
   const located = projectPath ? `cd /d ${safeCmdMigrationToken(projectPath)} && ${invocation}` : invocation;
   return codexHome
@@ -707,7 +716,7 @@ function safePowerShellMigrationToken(value: string): string {
 
 function safeCmdMigrationToken(value: string): string {
   if (/^[A-Za-z0-9_\-./:\\]+$/.test(value)) return value;
-  return `"${value.replace(/%/g, "%%").replace(/!/g, "^!").replace(/"/g, '""')}"`;
+  return `"${value.replace(/"/g, '""')}"`;
 }
 
 // Ghostty has no `--initial-command` option, so the previous flag was silently
