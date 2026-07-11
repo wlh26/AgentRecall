@@ -18,12 +18,13 @@ import {
   SOURCE_LABEL,
   sourceUiFamily,
 } from "../session-ui";
+import { readInitialToolEventsVisibility, storeToolEventsVisibility } from "../tool-events-visibility";
 
-type ConversationTimelineItem =
+export type ConversationTimelineItem =
   | { kind: "message"; key: string; timestampMs: number | null; order: number; message: SessionMessage }
   | { kind: "trace"; key: string; timestampMs: number | null; order: number; event: SessionTraceEvent };
 
-type ConversationRoleFilter = "all" | SessionMessage["role"];
+export type ConversationRoleFilter = "all" | SessionMessage["role"];
 
 const CONVERSATION_ROLE_FILTERS: ConversationRoleFilter[] = ["all", "user", "assistant"];
 
@@ -73,6 +74,17 @@ function conversationTimeline(messages: SessionMessage[], traceEvents: SessionTr
     if (a.timestampMs !== null && b.timestampMs === null) return -1;
     if (a.timestampMs === null && b.timestampMs !== null) return 1;
     return a.order - b.order;
+  });
+}
+
+export function filterConversationTimeline(
+  items: ConversationTimelineItem[],
+  roleFilter: ConversationRoleFilter,
+  showTools: boolean,
+): ConversationTimelineItem[] {
+  return items.filter((item) => {
+    if (item.kind === "trace") return showTools;
+    return roleFilter === "all" || item.message.role === roleFilter;
   });
 }
 
@@ -169,18 +181,26 @@ export function DetailPanel({
   const bodyRef = useRef<HTMLDivElement>(null);
   const pendingInitialScrollRef = useRef<string | null>(session.sessionKey);
   const [roleFilter, setRoleFilter] = useState<ConversationRoleFilter>("all");
+  const [showTools, setShowTools] = useState(readInitialToolEventsVisibility);
   const timelineItems = useMemo(() => conversationTimeline(messages, traceEvents), [messages, traceEvents]);
-  const roleFilteredMessages = useMemo(
-    () => roleFilter === "all" ? messages : messages.filter((message) => message.role === roleFilter),
-    [messages, roleFilter],
-  );
   const visibleTimelineItems = useMemo(
-    () => roleFilter === "all" ? timelineItems : roleFilteredMessages.map(messageTimelineItem),
-    [roleFilter, roleFilteredMessages, timelineItems],
+    () => filterConversationTimeline(timelineItems, roleFilter, showTools),
+    [roleFilter, showTools, timelineItems],
   );
-  const roleFilterEmpty = !loading && messages.length > 0 && roleFilter !== "all" && roleFilteredMessages.length === 0;
+  const roleFilterEmpty = !loading
+    && messages.length > 0
+    && roleFilter !== "all"
+    && !messages.some((message) => message.role === roleFilter);
   const localOnlyDisabled = isRemoteSession(session);
   const revealTitle = localOnlyDisabled ? remoteRevealTitle(language) : l(`Show in ${revealLabel}`, `在${revealLabel}中显示`);
+
+  const toggleTools = () => {
+    setShowTools((current) => {
+      const next = !current;
+      storeToolEventsVisibility(next);
+      return next;
+    });
+  };
 
   useEffect(() => {
     pendingInitialScrollRef.current = session.sessionKey;
@@ -363,17 +383,26 @@ export function DetailPanel({
           <section className="conversation">
             <div className="conversation-header">
               <h3>{l("Full Conversation", "完整会话")}</h3>
-              <div className="conversation-role-filter" role="group" aria-label={l("Conversation role filter", "会话角色过滤")}>
-                {CONVERSATION_ROLE_FILTERS.map((filter) => (
-                  <button
-                    key={filter}
-                    className={roleFilter === filter ? "active" : ""}
-                    onClick={() => setRoleFilter(filter)}
-                    aria-pressed={roleFilter === filter}
-                  >
-                    {conversationRoleFilterLabel(filter, language)}
-                  </button>
-                ))}
+              <div className="conversation-filters">
+                <div className="conversation-role-filter" role="group" aria-label={l("Conversation role filter", "会话角色过滤")}>
+                  {CONVERSATION_ROLE_FILTERS.map((filter) => (
+                    <button
+                      key={filter}
+                      className={roleFilter === filter ? "active" : ""}
+                      onClick={() => setRoleFilter(filter)}
+                      aria-pressed={roleFilter === filter}
+                    >
+                      {conversationRoleFilterLabel(filter, language)}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className={`conversation-tools-toggle ${showTools ? "active" : ""}`}
+                  onClick={toggleTools}
+                  aria-pressed={showTools}
+                >
+                  {l("Tools", "工具")}
+                </button>
               </div>
             </div>
             {loading ? <div className="loading-state">{l("Loading conversation...", "正在加载会话...")}</div> : null}

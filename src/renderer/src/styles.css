@@ -2094,6 +2094,13 @@ select:focus-visible {
   margin: 0;
 }
 
+.conversation-filters {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+}
+
 .conversation-role-filter {
   display: inline-flex;
   flex: 0 0 auto;
@@ -2120,6 +2127,27 @@ select:focus-visible {
 }
 
 .conversation-role-filter button.active {
+  background: var(--panel-bg);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
+.conversation-tools-toggle {
+  height: 29px;
+  padding: 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--panel-subtle);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.conversation-tools-toggle:hover {
+  color: var(--text);
+}
+
+.conversation-tools-toggle.active {
   background: var(--panel-bg);
   color: var(--text);
   box-shadow: inset 0 0 0 1px var(--border-subtle);

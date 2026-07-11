@@ -96,6 +96,13 @@ describe("stylesheet theme contract", () => {
     expect(detailTitle).toMatch(/-webkit-box-orient:\s*vertical/);
   });
 
+  it("separates the Tools toggle from role filters with spacing and no divider", () => {
+    const controls = stylesheet.match(/\.conversation-filters\s*\{[^}]*\}/)?.[0] ?? "";
+    const tools = stylesheet.match(/\.conversation-tools-toggle\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(controls).toMatch(/gap:\s*7px/);
+    expect(tools).not.toMatch(/border-left/);
+  });
+
   it("keeps toolbar action buttons isolated from remote environment filter chips", () => {
     const toolbar = stylesheet.match(/\.toolbar\s*\{[^}]*\}/)?.[0] ?? "";
     const toolbarFilters = stylesheet.match(/\.toolbar-filters\s*\{[^}]*\}/)?.[0] ?? "";

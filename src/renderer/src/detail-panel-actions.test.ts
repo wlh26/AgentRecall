@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import type { SessionMessage, SessionTraceEvent } from "../../core/types";
+import { filterConversationTimeline } from "./components/detail-panel";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const detailPanelSource = readFileSync(new URL("./components/detail-panel.tsx", import.meta.url), "utf8");
@@ -82,14 +84,41 @@ describe("detail panel actions", () => {
 
     expect(detailPanelSource).toContain('type ConversationRoleFilter = "all" | SessionMessage["role"]');
     expect(detailPanelSource).toContain('const CONVERSATION_ROLE_FILTERS: ConversationRoleFilter[] = ["all", "user", "assistant"]');
-    expect(detailPanelSource).toContain('roleFilter === "all" ? messages : messages.filter((message) => message.role === roleFilter)');
-    expect(detailPanelSource).toContain('roleFilter === "all" ? timelineItems : roleFilteredMessages.map(messageTimelineItem)');
+    expect(detailPanelSource).toContain("filterConversationTimeline(timelineItems, roleFilter, showTools)");
+    expect(detailPanelSource).toContain("!messages.some((message) => message.role === roleFilter)");
     expect(detailPanelSource).toContain('setRoleFilter("all");');
     expect(detailPanelSource).toContain("conversation-role-filter");
     expect(detailPanelSource).toContain("No User messages in the loaded conversation.");
     expect(detailPanelSource).toContain("No Assistant messages in the loaded conversation.");
     expect(showOlderIndex).toBeGreaterThanOrEqual(0);
     expect(visibleItemsIndex).toBeGreaterThan(showOlderIndex);
+  });
+
+  it("composes role filtering with independent tool-event visibility", () => {
+    const user = { index: 0, role: "user", content: "question", timestamp: "2026-07-11T00:00:00.000Z" } as SessionMessage;
+    const toolCall = { index: 0, kind: "tool_call", title: "Read", timestamp: "2026-07-11T00:00:01.000Z" } as SessionTraceEvent;
+    const assistant = { index: 1, role: "assistant", content: "answer", timestamp: "2026-07-11T00:00:02.000Z" } as SessionMessage;
+    const toolResult = { index: 1, kind: "tool_result", title: "tool output", timestamp: "2026-07-11T00:00:03.000Z" } as SessionTraceEvent;
+    const items = [
+      { kind: "message" as const, key: "message:0", timestampMs: 0, order: 0, message: user },
+      { kind: "trace" as const, key: "trace:0", timestampMs: 1, order: 1, event: toolCall },
+      { kind: "message" as const, key: "message:1", timestampMs: 2, order: 2, message: assistant },
+      { kind: "trace" as const, key: "trace:1", timestampMs: 3, order: 3, event: toolResult },
+    ];
+
+    expect(filterConversationTimeline(items, "all", false).map((item) => item.key)).toEqual(["message:0", "message:1"]);
+    expect(filterConversationTimeline(items, "all", true).map((item) => item.key)).toEqual(["message:0", "trace:0", "message:1", "trace:1"]);
+    expect(filterConversationTimeline(items, "user", true).map((item) => item.key)).toEqual(["message:0", "trace:0", "trace:1"]);
+    expect(filterConversationTimeline(items, "assistant", false).map((item) => item.key)).toEqual(["message:1"]);
+  });
+
+  it("renders Tools as a separate persisted toggle beside the role filter", () => {
+    expect(detailPanelSource).toContain("readInitialToolEventsVisibility");
+    expect(detailPanelSource).toContain("storeToolEventsVisibility");
+    expect(detailPanelSource).toContain('className={`conversation-tools-toggle ${showTools ? "active" : ""}`}');
+    expect(detailPanelSource).toContain("aria-pressed={showTools}");
+    expect(detailPanelSource).toContain('l("Tools", "工具")');
+    expect(detailPanelSource).toContain("setShowTools");
   });
 
   it("loads the visible message window before trace events when opening detail", () => {
