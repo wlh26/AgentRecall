@@ -51,4 +51,10 @@ test("workflows require branch notes and publish only main commits associated wi
   assert.match(releaseWorkflow, /cancel-in-progress:\s*false/);
   assert.match(releaseWorkflow, /npm test[\s\S]*npm run typecheck[\s\S]*npm run build/);
   assert.match(releaseWorkflow, /gh release upload/);
+  const tagIdentityName = releaseWorkflow.indexOf('git config user.name "github-actions[bot]"');
+  const tagIdentityEmail = releaseWorkflow.indexOf('git config user.email "41898282+github-actions[bot]@users.noreply.github.com"');
+  const annotatedTag = releaseWorkflow.indexOf('git tag -a "$TAG"');
+  assert.ok(tagIdentityName >= 0, "release workflow must configure the tag creator name");
+  assert.ok(tagIdentityEmail > tagIdentityName, "release workflow must configure the tag creator email after its name");
+  assert.ok(annotatedTag > tagIdentityEmail, "release workflow must configure an identity before creating an annotated tag");
 });
