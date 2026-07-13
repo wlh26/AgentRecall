@@ -125,12 +125,14 @@ import type {
   MigrationAgent,
   MigrationTarget,
   PortableSession,
+  ProjectQueryOptions,
   SearchOptions,
   SessionEnvironment,
   SessionMigrationResult,
   SessionSearchResult,
   SessionSource,
   SessionStatsOptions,
+  TagListOptions,
 } from "../core/types";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1653,8 +1655,13 @@ function registerIpc(): void {
       hideClaudeQuota: settings.hideClaudeQuota,
     });
   });
-  ipcMain.handle("tags:list", () => store.listTags());
-  ipcMain.handle("projects:list", () => store.listProjects(visibleProjectOptions()));
+  ipcMain.handle("tags:list", (_event, options?: TagListOptions) =>
+    store.listTags({ ...visibleProjectOptions(), ...options }),
+  );
+  ipcMain.handle("projects:list", (_event, options?: ProjectQueryOptions) =>
+    store.listProjects({ ...visibleProjectOptions(), ...options }),
+  );
+  ipcMain.handle("tags:by-project", () => store.listTagsByProject(visibleProjectOptions()));
   ipcMain.handle("environments:list", () => store.listEnvironments());
   ipcMain.handle("ssh-config:list-hosts", () => readUserSshConfig());
   ipcMain.handle("environment:save", (_event, input: EnvironmentUpsertInput) =>

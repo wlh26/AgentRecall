@@ -62,6 +62,7 @@ import type {
   EnvironmentUpsertInput,
   LiveSessionSnapshot,
   ProjectSummary,
+  ProjectTagEntry,
   SearchOptions,
   SessionEnvironment,
   SessionMigrationProgress,
@@ -120,6 +121,7 @@ import {
   environmentBadgeLabel,
   environmentBadgeTitle,
   isBranchTag,
+  displayTagName,
   isRemoteSession,
   liveStatusFilterLabel,
   localizedLiveStateLabel,
@@ -453,6 +455,7 @@ export function App(): ReactElement {
   const [language, setLanguage] = useState<LanguageMode>(() => readInitialLanguage());
   const [sidebarSections, setSidebarSections] = useState<SidebarSectionsState>(() => loadInitialSidebarSections());
   const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Set<string>>(() => loadCollapsedProjectGroups());
+  const [collapsedTreeProjects, setCollapsedTreeProjects] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
   const [source, setSource] = useState<SearchOptions["source"]>("all");
   const [environmentId, setEnvironmentId] = useState<string | "all">("all");
@@ -468,6 +471,7 @@ export function App(): ReactElement {
   const [results, setResults] = useState<SessionSearchResult[]>([]);
   const [tags, setTags] = useState<string[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [projectTags, setProjectTags] = useState<ProjectTagEntry[]>([]);
   const [environments, setEnvironments] = useState<SessionEnvironment[]>([]);
   const [stats, setStats] = useState<SessionStats>(EMPTY_STATS);
   const [statsPeriod, setStatsPeriod] = useState<SessionStatsPeriod>("today");
@@ -531,6 +535,12 @@ export function App(): ReactElement {
   const statsLoadSeqRef = useRef(0);
   const detailLoadSeqRef = useRef(0);
   const searchRef = useRef<HTMLInputElement>(null);
+  const environmentIdRef = useRef(environmentId);
+  const projectPathRef = useRef(projectPath);
+  const projectEnvironmentIdRef = useRef(projectEnvironmentId);
+  environmentIdRef.current = environmentId;
+  projectPathRef.current = projectPath;
+  projectEnvironmentIdRef.current = projectEnvironmentId;
   const t = useCallback((en: string, zh: string) => localize(language, en, zh), [language]);
   const searchScopeKey = useMemo(
     () => JSON.stringify([query, source, environmentId, tag ?? "", projectPath ?? "", projectEnvironmentId ?? "", visibility, dateRange, liveStatus]),
@@ -579,15 +589,17 @@ export function App(): ReactElement {
 
   const loadSidebarMetadata = useCallback(async () => {
     const requestId = ++metadataLoadSeqRef.current;
-    const [nextTags, nextProjects, nextEnvironments] = await Promise.all([
+    const [nextTags, nextProjects, nextEnvironments, nextProjectTags] = await Promise.all([
       window.sessionSearch.listTags(),
       window.sessionSearch.listProjects(),
       window.sessionSearch.listEnvironments(),
+      window.sessionSearch.listTagsByProject(),
     ]);
     if (requestId !== metadataLoadSeqRef.current) return;
     setTags(nextTags);
     setProjects(nextProjects);
     setEnvironments(nextEnvironments);
+    setProjectTags(nextProjectTags);
   }, []);
 
   const loadStats = useCallback(async () => {
@@ -911,6 +923,29 @@ export function App(): ReactElement {
     }
   }, [environmentId, environments, projectEnvironmentId]);
 
+  useEffect(() => {
+    if (tag && tags.length > 0 && !tags.includes(tag)) {
+      setTag(undefined);
+    }
+  }, [tag, tags]);
+
+  useEffect(() => {
+    if (
+      projectPath &&
+      projects.length > 0 &&
+      !projects.some((project) =>
+        projectEnvironmentId
+          ? project.path === projectPath && project.environmentId === projectEnvironmentId
+          : project.path === projectPath,
+      )
+    ) {
+      setProjectPath(undefined);
+      setProjectEnvironmentId(undefined);
+      projectPathRef.current = undefined;
+      projectEnvironmentIdRef.current = undefined;
+    }
+  }, [projectPath, projectEnvironmentId, projects]);
+
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme;
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
@@ -934,6 +969,15 @@ export function App(): ReactElement {
       const next = new Set(current);
       if (next.has(environmentId)) next.delete(environmentId);
       else next.add(environmentId);
+      return next;
+    });
+  }, []);
+
+  const toggleTreeProject = useCallback((projectKey: string): void => {
+    setCollapsedTreeProjects((current) => {
+      const next = new Set(current);
+      if (next.has(projectKey)) next.delete(projectKey);
+      else next.add(projectKey);
       return next;
     });
   }, []);
@@ -1100,24 +1144,44 @@ export function App(): ReactElement {
     });
   }, [appSettings, pendingPersonalSources]);
   const selectedProject = useMemo(
-    () => projects.find((project) => project.path === projectPath && project.environmentId === projectEnvironmentId) || null,
+    () =>
+      projects.find((project) => project.path === projectPath && project.environmentId === projectEnvironmentId) ||
+      (projectPath ? projects.find((project) => project.path === projectPath) || null : null),
     [projects, projectPath, projectEnvironmentId],
   );
-  const groupedProjects = useMemo(() => {
-    const groups = new Map<string, { environment: SessionEnvironment | null; projects: ProjectSummary[] }>();
-    for (const project of projects) {
-      const environment = environments.find((env) => env.id === project.environmentId) ?? null;
-      const key = project.environmentId;
-      const group = groups.get(key);
-      if (group) group.projects.push(project);
-      else groups.set(key, { environment, projects: [project] });
+  const sidebarTree = useMemo(() => {
+    // Merge by project path so the same project on local + SSH appears once.
+    // Tags are the union of all environments for that path, deduplicated.
+    const tagSetByPath = new Map<string, Set<string>>();
+    for (const entry of projectTags) {
+      let set = tagSetByPath.get(entry.projectPath);
+      if (!set) {
+        set = new Set<string>();
+        tagSetByPath.set(entry.projectPath, set);
+      }
+      for (const tagName of entry.tags) set.add(tagName);
     }
-    return [...groups.values()].sort(
-      (a, b) =>
-        (a.environment ? 0 : 1) - (b.environment ? 0 : 1) ||
-        (a.environment?.label ?? "").localeCompare(b.environment?.label ?? ""),
+    const byPath = new Map<string, { path: string; label: string; tags: string[]; environmentIds: string[]; lastActivityAt: number }>();
+    for (const project of projects) {
+      const existing = byPath.get(project.path);
+      const tags = [...(tagSetByPath.get(project.path) ?? [])].sort((a, b) => a.localeCompare(b));
+      if (existing) {
+        existing.environmentIds.push(project.environmentId);
+        if (project.lastActivityAt > existing.lastActivityAt) existing.lastActivityAt = project.lastActivityAt;
+      } else {
+        byPath.set(project.path, {
+          path: project.path,
+          label: project.label,
+          tags,
+          environmentIds: [project.environmentId],
+          lastActivityAt: project.lastActivityAt,
+        });
+      }
+    }
+    return [...byPath.values()].sort(
+      (a, b) => b.lastActivityAt - a.lastActivityAt || a.label.localeCompare(b.label),
     );
-  }, [projects, environments]);
+  }, [projects, projectTags]);
   const selectedEnvironment = useMemo(
     () => (environmentId === "all" ? null : environments.find((environment) => environment.id === environmentId) ?? null),
     [environmentId, environments],
@@ -1125,7 +1189,7 @@ export function App(): ReactElement {
   const searchPlaceholder = projectPath
     ? t(`Search within ${selectedProject?.label || "project"}`, `在 ${selectedProject?.label || "项目"} 中搜索`)
     : tag
-      ? t(`Search within #${tag}`, `在 #${tag} 中搜索`)
+      ? t(`Search within ${displayTagName(tag)}`, `在 ${displayTagName(tag)} 中搜索`)
       : t("Search titles, first questions, full text, paths, or ids", "搜索标题、首个问题、全文、路径或 ID");
 
   useEffect(() => {
@@ -1141,15 +1205,22 @@ export function App(): ReactElement {
   function clearProjectFilter(): void {
     setProjectPath(undefined);
     setProjectEnvironmentId(undefined);
+    projectPathRef.current = undefined;
+    projectEnvironmentIdRef.current = undefined;
   }
 
   function selectEnvironment(nextEnvironmentId: string | "all"): void {
+    if (nextEnvironmentId === environmentId) return;
     setEnvironmentId(nextEnvironmentId);
+    environmentIdRef.current = nextEnvironmentId;
   }
 
   function selectProject(project: ProjectSummary): void {
+    if (project.path === projectPath && project.environmentId === projectEnvironmentId) return;
     setProjectPath(project.path);
     setProjectEnvironmentId(project.environmentId);
+    projectPathRef.current = project.path;
+    projectEnvironmentIdRef.current = project.environmentId;
   }
 
   async function openDetail(session: SessionSearchResult, matchHit?: SessionMatchHit): Promise<void> {
@@ -1777,27 +1848,6 @@ export function App(): ReactElement {
           language={language}
         />
 
-        <SidebarSectionHeader title={t("Views", "视图")} expanded={sidebarSections.views} onToggle={() => toggleSidebarSectionById("views")} />
-        {sidebarSections.views ? (
-          <nav className="nav-group">
-            <button className={visibility === "default" ? "active" : ""} onClick={() => setVisibility("default")}>
-              {t("All", "全部")}
-            </button>
-            <button className={visibility === "favorites" ? "active" : ""} onClick={() => setVisibility("favorites")}>
-              <Star size={14} />
-              {t("Favorites", "收藏")}
-            </button>
-            <button className={visibility === "pinned" ? "active" : ""} onClick={() => setVisibility("pinned")}>
-              <Pin size={14} />
-              {t("Pinned", "置顶")}
-            </button>
-            <button className={visibility === "hidden" ? "active" : ""} onClick={() => setVisibility("hidden")}>
-              <EyeOff size={14} />
-              {t("Hidden", "隐藏")}
-            </button>
-          </nav>
-        ) : null}
-
         <SidebarSectionHeader title={t("Environments", "环境")} expanded={sidebarSections.environments} onToggle={() => toggleSidebarSectionById("environments")} />
         {sidebarSections.environments ? (
           <nav className="environment-list">
@@ -1819,6 +1869,93 @@ export function App(): ReactElement {
           </nav>
         ) : null}
 
+        <SidebarSectionHeader title={t("Projects", "项目")} expanded={sidebarSections.projects} onToggle={() => toggleSidebarSectionById("projects")} />
+        {sidebarSections.projects ? (
+          <nav className="sidebar-tree">
+           <button
+             className={`tree-row tree-root ${!projectPath && !tag ? "active" : ""}`}
+              onClick={() => { selectEnvironment("all"); clearProjectFilter(); setTag(undefined); }}
+           >
+              <span>{t("All Sessions", "全部会话")}</span>
+            </button>
+           {sidebarTree.map((project) => {
+             const projectKey = project.path;
+              const projExpanded = collapsedTreeProjects.has(projectKey);
+              const projCollapsed = !projExpanded;
+              const projActive = projectPath === project.path && !tag;
+              return (
+                <div key={projectKey} className="tree-group">
+                  <div className="tree-row tree-proj-row">
+                    {project.tags.length > 0 ? (
+                      <button
+                        className="tree-chevron"
+                        onClick={() => toggleTreeProject(projectKey)}
+                        aria-expanded={projExpanded}
+                        aria-label={projCollapsed ? t("Expand", "展开") : t("Collapse", "折叠")}
+                      >
+                        {projCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                      </button>
+                    ) : (
+                      <span className="tree-chevron-spacer" />
+                    )}
+                    <button
+                      className={`tree-label ${projActive ? "active" : ""}`}
+                     onClick={() => {
+                       setProjectPath(project.path);
+                       setProjectEnvironmentId(undefined);
+                        setTag(undefined);
+                       projectPathRef.current = project.path;
+                       projectEnvironmentIdRef.current = undefined;
+                     }}
+                      title={project.path}
+                    >
+                      <Folder size={13} />
+                      <span>{project.label}</span>
+                      <em>{formatRelativeTime(project.lastActivityAt)}</em>
+                    </button>
+                  </div>
+                  {!projCollapsed && project.tags.map((tagName) => (
+                    <div
+                      key={tagName}
+                      className={`tree-row tree-tag-row ${tag === tagName && projectPath === project.path ? "active" : ""} ${isBranchTag(tagName) ? "branch-tag" : ""}`}
+                    >
+                     <button
+                       className="tree-label"
+                        onClick={() => {
+                          if (tag === tagName) {
+                            setTag(undefined);
+                          } else {
+                            setTag(tagName);
+                            setProjectPath(project.path);
+                            setProjectEnvironmentId(undefined);
+                            projectPathRef.current = project.path;
+                            projectEnvironmentIdRef.current = undefined;
+                          }
+                        }}
+                       title={t(`Filter by ${displayTagName(tagName)}`, `按 ${displayTagName(tagName)} 过滤`)}
+                    >
+                       {isBranchTag(tagName) ? <GitBranch size={13} /> : <Tag size={13} />}
+                       <span>{displayTagName(tagName)}</span>
+                     </button>
+                     <button
+                       className="tag-delete"
+                       onClick={(event) => {
+                         event.stopPropagation();
+                         setDeleteTagName(tagName);
+                       }}
+                        title={t(`Delete tag ${displayTagName(tagName)}`, `删除标签 ${displayTagName(tagName)}`)}
+                        aria-label={t(`Delete tag ${displayTagName(tagName)}`, `删除标签 ${displayTagName(tagName)}`)}
+                     >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </nav>
+        ) : null}
+
         <SidebarSectionHeader title={t("Sources", "来源")} expanded={sidebarSections.sources} onToggle={() => toggleSidebarSectionById("sources")} />
         {sidebarSections.sources ? (
           <nav className="nav-group">
@@ -1830,79 +1967,24 @@ export function App(): ReactElement {
           </nav>
         ) : null}
 
-        <SidebarSectionHeader title={t("Projects", "项目")} expanded={sidebarSections.projects} onToggle={() => toggleSidebarSectionById("projects")} />
-        {sidebarSections.projects ? (
-          <nav className="project-list">
-            <button
-              className={!projectPath ? "active" : ""}
-              onClick={() => {
-                setProjectPath(undefined);
-                setProjectEnvironmentId(undefined);
-              }}
-            >
-              {t("All Projects", "全部项目")}
+        <SidebarSectionHeader title={t("Views", "视图")} expanded={sidebarSections.views} onToggle={() => toggleSidebarSectionById("views")} />
+        {sidebarSections.views ? (
+          <nav className="nav-group">
+            <button className={visibility === "default" ? "active" : ""} onClick={() => setVisibility("default")}>
+              {t("All", "全部")}
             </button>
-            {groupedProjects.map((group) => {
-              const groupId = group.projects[0]?.environmentId ?? "unknown";
-              const collapsed = collapsedProjectGroups.has(groupId);
-              return (
-              <div key={groupId} className="project-group">
-                <button
-                  className="project-group-header"
-                  onClick={() => toggleProjectGroup(groupId)}
-                  aria-expanded={!collapsed}
-                >
-                  {group.environment?.kind === "local" ? <Laptop size={11} /> : group.environment?.kind === "ssh" ? <Server size={11} /> : null}
-                  <span>{group.environment?.label ?? t("Unknown", "未知")}</span>
-                  <em className="project-group-count">{group.projects.length}</em>
-                  {collapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
-                </button>
-                {!collapsed && group.projects.map((project) => (
-                  <button
-                    key={`${project.environmentId}:${project.path}`}
-                    className={`project-row ${projectPath === project.path && projectEnvironmentId === project.environmentId ? "active" : ""}`}
-                    onClick={() => selectProject(project)}
-                    title={t(`${project.path} · ${project.sessionCount} sessions`, `${project.path} · ${project.sessionCount} 个会话`)}
-                  >
-                    <Folder size={13} />
-                    <span>{project.label}</span>
-                    <em>{formatRelativeTime(projectSortTimestamp(project))}</em>
-                  </button>
-                ))}
-              </div>
-              );
-            })}
-          </nav>
-        ) : null}
-
-        <SidebarSectionHeader title={t("Tags", "标签")} expanded={sidebarSections.tags} onToggle={() => toggleSidebarSectionById("tags")} />
-        {sidebarSections.tags ? (
-          <nav className="tag-list">
-            <button className={!tag ? "active" : ""} onClick={() => setTag(undefined)}>
-              {t("All Tags", "全部标签")}
+            <button className={visibility === "favorites" ? "active" : ""} onClick={() => setVisibility("favorites")}>
+              <Star size={14} />
+              {t("Favorites", "收藏")}
             </button>
-            {tags.map((tagName) => (
-              <div
-                key={tagName}
-                className={`tag-list-row ${tag === tagName ? "active" : ""} ${isBranchTag(tagName) ? "branch-tag" : ""}`}
-              >
-                <button className="tag-filter" onClick={() => setTag(tagName)} title={t(`Filter by ${tagName}`, `按 ${tagName} 过滤`)}>
-                  {isBranchTag(tagName) ? <GitBranch size={13} /> : <Tag size={13} />}
-                  <span>{tagName}</span>
-                </button>
-                <button
-                  className="tag-delete"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setDeleteTagName(tagName);
-                  }}
-                  title={t(`Delete tag ${tagName}`, `删除标签 ${tagName}`)}
-                  aria-label={t(`Delete tag ${tagName}`, `删除标签 ${tagName}`)}
-                >
-                  <Trash2 size={13} />
-                </button>
-              </div>
-            ))}
+            <button className={visibility === "pinned" ? "active" : ""} onClick={() => setVisibility("pinned")}>
+              <Pin size={14} />
+              {t("Pinned", "置顶")}
+            </button>
+            <button className={visibility === "hidden" ? "active" : ""} onClick={() => setVisibility("hidden")}>
+              <EyeOff size={14} />
+              {t("Hidden", "隐藏")}
+            </button>
           </nav>
         ) : null}
       </section>
@@ -1935,10 +2017,10 @@ export function App(): ReactElement {
               </button>
             ) : null}
             {tag ? (
-              <button className="chip clear" onClick={() => setTag(undefined)}>
-                <span>#{tag}</span>
-                <span aria-hidden="true">×</span>
-              </button>
+             <button className="chip clear" onClick={() => setTag(undefined)}>
+                <span>{isBranchTag(tag) ? <GitBranch size={12} /> : "#"}{displayTagName(tag)}</span>
+               <span aria-hidden="true">×</span>
+             </button>
             ) : null}
             <div className="live-filter" role="group" aria-label="Live session status">
               {LIVE_STATUS_FILTERS.map((option) => (
@@ -2618,9 +2700,9 @@ const SessionRow = memo(function SessionRow({
       </div>
       <div className="row-tags">
         {session.tags.slice(0, 3).map((tagName) => (
-          <span key={tagName} className={isBranchTag(tagName) ? "branch-tag" : undefined}>
-            #{tagName}
-          </span>
+         <span key={tagName} className={isBranchTag(tagName) ? "branch-tag" : undefined}>
+            {isBranchTag(tagName) ? "" : "#"}{displayTagName(tagName)}
+         </span>
         ))}
       </div>
     </article>

@@ -197,6 +197,20 @@ export interface SearchOptions {
 
 export interface ProjectQueryOptions {
   excludeSubagents?: boolean;
+  environmentId?: string;
+}
+
+export interface TagListOptions {
+  environmentId?: string;
+  projectPath?: string;
+  projectEnvironmentId?: string;
+  excludeSubagents?: boolean;
+}
+
+export interface ProjectTagEntry {
+  environmentId: string;
+  projectPath: string;
+  tags: string[];
 }
 
 export interface ProjectSummary {

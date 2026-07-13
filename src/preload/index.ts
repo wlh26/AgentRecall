@@ -25,6 +25,8 @@ import type {
   MigrationAgent,
   MigrationTarget,
   ProjectSummary,
+  ProjectQueryOptions,
+  ProjectTagEntry,
   SearchOptions,
   SessionEnvironment,
   SessionMessage,
@@ -35,6 +37,7 @@ import type {
   SessionStats,
   SessionStatsOptions,
   SessionTraceEvent,
+  TagListOptions,
   UsageQuotaSnapshot,
 } from "../core/types";
 
@@ -67,8 +70,9 @@ const api = {
   getMcpStatus: (): Promise<boolean> => ipcRenderer.invoke("mcp:status"),
   setMcpEnabled: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke("mcp:set-enabled", enabled),
   getQuotas: (): Promise<UsageQuotaSnapshot> => ipcRenderer.invoke("quota:get"),
-  listTags: (): Promise<string[]> => ipcRenderer.invoke("tags:list"),
-  listProjects: (): Promise<ProjectSummary[]> => ipcRenderer.invoke("projects:list"),
+  listTags: (options?: TagListOptions): Promise<string[]> => ipcRenderer.invoke("tags:list", options),
+  listProjects: (options?: ProjectQueryOptions): Promise<ProjectSummary[]> => ipcRenderer.invoke("projects:list", options),
+  listTagsByProject: (): Promise<ProjectTagEntry[]> => ipcRenderer.invoke("tags:by-project"),
   listEnvironments: (): Promise<SessionEnvironment[]> => ipcRenderer.invoke("environments:list"),
   listSshConfigHosts: (): Promise<SshConfigHost[]> => ipcRenderer.invoke("ssh-config:list-hosts"),
   saveEnvironment: (environment: EnvironmentUpsertInput): Promise<SessionEnvironment> =>

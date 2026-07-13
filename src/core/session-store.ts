@@ -29,6 +29,8 @@ import type {
   SessionStatsSummary,
   SessionSortBy,
   SessionSource,
+  ProjectTagEntry,
+  TagListOptions,
   SessionTraceEvent,
   TokenUsage,
   TokenUsageEvent,
@@ -571,10 +573,67 @@ export class SessionStore {
     this.db.prepare("DELETE FROM tags WHERE name = ?").run(tagName.trim());
   }
 
-  listTags(): string[] {
-    return (this.db.prepare("SELECT name FROM tags ORDER BY lower(name)").all() as Array<{ name: string }>).map(
-      (row) => row.name,
-    );
+  listTags(options: TagListOptions = {}): string[] {
+    const conditions: string[] = [];
+    const args: SQLInputValue[] = [];
+    if (options.environmentId && options.environmentId !== "all") {
+      conditions.push("sessions.environment_id = ?");
+      args.push(options.environmentId);
+    }
+    if (options.projectPath) {
+      conditions.push("sessions.project_path = ?");
+      args.push(options.projectPath);
+    }
+    if (options.excludeSubagents) {
+      conditions.push("sessions.is_subagent = 0");
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const rows = this.db
+      .prepare(
+        `
+        SELECT DISTINCT tags.name AS name
+        FROM tags
+        INNER JOIN session_tags ON session_tags.tag_id = tags.id
+        INNER JOIN sessions ON sessions.session_key = session_tags.session_key
+        ${where}
+        ORDER BY lower(tags.name)
+      `,
+      )
+      .all(...args) as Array<{ name: string }>;
+    return rows.map((row) => row.name);
+  }
+
+  listTagsByProject(options: { excludeSubagents?: boolean } = {}): ProjectTagEntry[] {
+    const subagentPredicate = options.excludeSubagents ? "AND sessions.is_subagent = 0" : "";
+    const rows = this.db
+      .prepare(
+        `
+        SELECT
+          sessions.environment_id AS environment_id,
+          sessions.project_path AS project_path,
+          tags.name AS tag_name
+        FROM tags
+        INNER JOIN session_tags ON session_tags.tag_id = tags.id
+        INNER JOIN sessions ON sessions.session_key = session_tags.session_key
+        WHERE trim(sessions.project_path) != ''
+          ${subagentPredicate}
+        ORDER BY sessions.environment_id, sessions.project_path, lower(tags.name)
+      `,
+      )
+      .all() as Array<{ environment_id: string; project_path: string; tag_name: string }>;
+    const map = new Map<string, ProjectTagEntry>();
+    for (const row of rows) {
+      const key = `${row.environment_id}\0${row.project_path}`;
+      let entry = map.get(key);
+      if (!entry) {
+        entry = { environmentId: row.environment_id, projectPath: row.project_path, tags: [] };
+        map.set(key, entry);
+      }
+      if (!entry.tags.includes(row.tag_name)) {
+        entry.tags.push(row.tag_name);
+      }
+    }
+    return [...map.values()];
   }
 
   listEnvironments(): SessionEnvironment[] {
@@ -712,6 +771,10 @@ export class SessionStore {
 
   listProjects(options: ProjectQueryOptions = {}): ProjectSummary[] {
     const subagentPredicate = options.excludeSubagents ? "AND sessions.is_subagent = 0" : "";
+    const environmentPredicate =
+      options.environmentId && options.environmentId !== "all" ? "AND sessions.environment_id = ?" : "";
+    const environmentArgs =
+      options.environmentId && options.environmentId !== "all" ? [options.environmentId] : [];
     const rows = this.db
       .prepare(
         `
@@ -726,10 +789,11 @@ export class SessionStore {
         LEFT JOIN environments ON environments.id = sessions.environment_id
         WHERE trim(project_path) != ''
           ${subagentPredicate}
+          ${environmentPredicate}
         GROUP BY sessions.project_path, sessions.environment_id
       `,
       )
-      .all() as Array<{
+      .all(...environmentArgs) as Array<{
         project_path: string;
         environment_id: string;
         environment_label: string | null;

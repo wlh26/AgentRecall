@@ -50,6 +50,10 @@ export function isBranchTag(tagName: string): boolean {
   return tagName.startsWith("branch:");
 }
 
+export function displayTagName(tagName: string): string {
+  return tagName.startsWith("branch:") ? tagName.slice("branch:".length) : tagName;
+}
+
 export function sourceUiFamily(source: SessionSource): "claude" | "codex" | "codebuddy" | "other" {
   if (source.startsWith("claude")) return "claude";
   if (source.startsWith("codex")) return "codex";
