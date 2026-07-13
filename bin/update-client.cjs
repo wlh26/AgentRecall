@@ -14,7 +14,7 @@ const GITHUB_REPOSITORY = "zszz3/agent-session-search";
 const LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest`;
 const UPDATE_ASSET_NAME = "update.json";
 const UPDATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const UPDATE_REQUEST_TIMEOUT_MS = 2_000;
+const UPDATE_REQUEST_TIMEOUT_MS = 5_000;
 
 function packageRoot() {
   return path.resolve(__dirname, "..");
@@ -190,9 +190,16 @@ async function snoozeUpdatePrompt(version, options = {}) {
 
 async function fetchWithTimeout(fetchImpl, url, init, timeoutMs) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   try {
     return await fetchImpl(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (timedOut) throw new Error(`The GitHub request timed out after ${timeoutMs} ms.`);
+    throw error;
   } finally {
     clearTimeout(timer);
   }

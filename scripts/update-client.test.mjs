@@ -7,6 +7,7 @@ import { test } from "node:test";
 
 const require = createRequire(import.meta.url);
 const {
+  UPDATE_REQUEST_TIMEOUT_MS,
   checkForUpdate,
   compareVersions,
   formatUpdateNotice,
@@ -14,6 +15,10 @@ const {
   parseUpdateManifest,
   snoozeUpdatePrompt,
 } = require("../bin/update-client.cjs");
+
+test("allows enough time for a normal GitHub release check", () => {
+  assert.equal(UPDATE_REQUEST_TIMEOUT_MS, 5_000);
+});
 
 function manifest(version = "0.2.0") {
   return {
@@ -101,4 +106,20 @@ test("checks GitHub latest release and formats the same notes for terminal outpu
   assert.equal(result.manifest.version, "0.2.0");
   assert.match(formatUpdateNotice(result), /新增功能：[\s\S]*Bug 修复：/);
   assert.equal(requests.length, 2);
+});
+
+test("reports a clear error when the GitHub release check times out", async () => {
+  const cacheDirectory = await mkdtemp(path.join(tmpdir(), "agent-session-update-timeout-"));
+  const fetchImpl = async (_url, init) => new Promise((_resolve, reject) => {
+    init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+  });
+  const result = await checkForUpdate({
+    currentVersion: "0.1.0",
+    cachePath: path.join(cacheDirectory, "update-check.json"),
+    fetchImpl,
+    force: true,
+    timeoutMs: 5,
+  });
+  assert.equal(result.updateAvailable, false);
+  assert.equal(result.error, "The GitHub request timed out after 5 ms.");
 });
