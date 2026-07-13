@@ -16,6 +16,8 @@ const HTTP_BODY_LIMIT = 64 * 1024;
 const QUOTA_FIVE_HOUR = "five_hour";
 const QUOTA_SEVEN_DAY = "seven_day";
 const QUOTA_CODE_REVIEW = "code_review";
+const FIVE_HOURS_SECONDS = 5 * 60 * 60;
+const SEVEN_DAYS_SECONDS = 7 * 24 * 60 * 60;
 const CLAUDE_STATUSLINE_SCRIPT_BASENAME = "claude-statusline-snapshot.cjs";
 const CLAUDE_STATUSLINE_BIN_NAME = "agent-session-search-claude-statusline";
 
@@ -378,13 +380,28 @@ function codexWindowResetAt(window: CodexUsageWindow, now: Date): number | undef
   return undefined;
 }
 
+function codexWindowIdentity(
+  window: CodexUsageWindow,
+  fallback: { key: string; label: string },
+): { key: string; label: string } {
+  if (window.limit_window_seconds === FIVE_HOURS_SECONDS) return { key: QUOTA_FIVE_HOUR, label: "5h" };
+  if (window.limit_window_seconds === SEVEN_DAYS_SECONDS) return { key: QUOTA_SEVEN_DAY, label: "7d" };
+  return fallback;
+}
+
 function codexQuotasFromResponse(response: CodexUsageResponse, now: Date): UsageQuota[] {
   const quotas: UsageQuota[] = [];
   const primary = response.rate_limit?.primary_window ?? null;
   const secondary = response.rate_limit?.secondary_window ?? null;
   const codeReview = response.code_review_rate_limit?.primary_window ?? null;
-  if (primary) quotas.push(quotaFromUsedPercent(QUOTA_FIVE_HOUR, "5h", codexWindowUsedPercent(primary), codexWindowResetAt(primary, now), now));
-  if (secondary) quotas.push(quotaFromUsedPercent(QUOTA_SEVEN_DAY, "7d", codexWindowUsedPercent(secondary), codexWindowResetAt(secondary, now), now));
+  if (primary) {
+    const identity = codexWindowIdentity(primary, { key: QUOTA_FIVE_HOUR, label: "5h" });
+    quotas.push(quotaFromUsedPercent(identity.key, identity.label, codexWindowUsedPercent(primary), codexWindowResetAt(primary, now), now));
+  }
+  if (secondary) {
+    const identity = codexWindowIdentity(secondary, { key: QUOTA_SEVEN_DAY, label: "7d" });
+    quotas.push(quotaFromUsedPercent(identity.key, identity.label, codexWindowUsedPercent(secondary), codexWindowResetAt(secondary, now), now));
+  }
   if (codeReview) quotas.push(quotaFromUsedPercent(QUOTA_CODE_REVIEW, "Review", codexWindowUsedPercent(codeReview), codexWindowResetAt(codeReview, now), now));
   return quotas.filter(Boolean);
 }

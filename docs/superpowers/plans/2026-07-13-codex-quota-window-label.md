@@ -27,7 +27,7 @@
 - Consumes: `CodexUsageWindow.limit_window_seconds?: number` and the existing `quotaFromUsedPercent(...)` normalizer.
 - Produces: duration-aware `UsageQuota` entries from `codexQuotasFromResponse(response, now)`; no public API changes.
 
-- [ ] **Step 1: Write the failing regression test**
+- [x] **Step 1: Write the failing regression test**
 
 Add a test after the existing Codex normalization test:
 
@@ -64,13 +64,13 @@ it("labels a seven-day Codex primary window from its duration", async () => {
 });
 ```
 
-- [ ] **Step 2: Run the regression test and verify RED**
+- [x] **Step 2: Run the regression test and verify RED**
 
 Run: `npm test -- --run src/core/quota.test.ts -t "labels a seven-day Codex primary window from its duration"`
 
 Expected: FAIL because the actual quota still has `key: "five_hour"` and `label: "5h"`.
 
-- [ ] **Step 3: Implement the minimal duration-aware mapping**
+- [x] **Step 3: Implement the minimal duration-aware mapping**
 
 Add duration constants and a helper near the existing Codex quota constants/functions:
 
@@ -101,7 +101,7 @@ if (secondary) {
 }
 ```
 
-- [ ] **Step 4: Verify GREEN and compatibility**
+- [x] **Step 4: Verify GREEN and compatibility**
 
 Run: `npm test -- --run src/core/quota.test.ts`
 

@@ -59,6 +59,37 @@ describe("usage quota loader", () => {
     }
   });
 
+  it("labels a seven-day Codex primary window from its duration", async () => {
+    const homeDir = makeHome();
+    try {
+      writeJson(path.join(homeDir, ".codex", "auth.json"), {
+        tokens: { access_token: "codex-access", account_id: "account-1" },
+      });
+
+      const card = await loadCodexQuotaCard({
+        now: NOW,
+        homeDir,
+        env: {},
+        codexFetcher: async () => ({
+          rate_limit: {
+            primary_window: {
+              used_percent: 20,
+              limit_window_seconds: 604800,
+              reset_at: 1_807_000_000,
+            },
+            secondary_window: null,
+          },
+        }),
+      });
+
+      expect(card.quotas).toEqual([
+        expect.objectContaining({ key: "seven_day", label: "7d", usedPercent: 20, remainingPercent: 80 }),
+      ]);
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("parses Codex quota from percent_left when used_percent is absent", async () => {
     const homeDir = makeHome();
     try {
