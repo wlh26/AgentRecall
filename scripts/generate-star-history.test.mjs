@@ -161,7 +161,7 @@ test('scheduled workflow regenerates and commits the chart only when it changes'
   const workflow = await readFile('.github/workflows/update-star-history.yml', 'utf8')
 
   assert.match(workflow, /schedule:/)
-  assert.match(workflow, /cron:\s*['"]7,22,37,52 \* \* \* \*['"]/)
+  assert.match(workflow, /cron:\s*['"]7 \*\/3 \* \* \*['"]/)
   assert.match(workflow, /workflow_dispatch:/)
   assert.match(workflow, /contents:\s*write/)
   assert.match(workflow, /actions\/checkout@[0-9a-f]{40} # v4/)
