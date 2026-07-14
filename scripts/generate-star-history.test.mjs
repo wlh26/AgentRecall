@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { test } from 'node:test'
 
 import {
   fetchStarCount,
+  generateStarHistory,
   parseStarHistoryData,
   renderStarHistorySvg,
   updateDailySnapshots
@@ -73,6 +76,65 @@ test('updateDailySnapshots replaces today and fills missing UTC days', () => {
     updateDailySnapshots([{ date: '2026-07-14', count: 151 }], '2026-07-14', 152),
     [{ date: '2026-07-14', count: 152 }]
   )
+})
+
+test('generateStarHistory updates the snapshot and SVG together', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'star-history-'))
+  const dataPath = join(directory, 'star-history-data.json')
+  const outputPath = join(directory, 'star-history.svg')
+  await writeFile(dataPath, JSON.stringify({
+    repository: 'zszz3/agent-session-search',
+    snapshots: [{ date: '2026-07-13', count: 151 }]
+  }))
+
+  const changed = await generateStarHistory({
+    repository: 'zszz3/agent-session-search',
+    token: 'test-token',
+    dataPath,
+    outputPath,
+    now: new Date('2026-07-14T08:00:00Z'),
+    fetchImpl: async () => new Response(JSON.stringify({ stargazers_count: 152 }), { status: 200 })
+  })
+
+  assert.equal(changed, true)
+  assert.deepEqual(JSON.parse(await readFile(dataPath, 'utf8')).snapshots.at(-1), { date: '2026-07-14', count: 152 })
+  assert.match(await readFile(outputPath, 'utf8'), /reaching 152 stars/)
+})
+
+test('generateStarHistory is idempotent when today is unchanged', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'star-history-idempotent-'))
+  const dataPath = join(directory, 'star-history-data.json')
+  const outputPath = join(directory, 'star-history.svg')
+  const data = {
+    repository: 'zszz3/agent-session-search',
+    snapshots: [{ date: '2026-07-14', count: 152 }]
+  }
+  const json = `${JSON.stringify(data, null, 2)}\n`
+  const svg = renderStarHistorySvg({ repository: data.repository, series: data.snapshots })
+  await writeFile(dataPath, json)
+  await writeFile(outputPath, svg)
+
+  const changed = await generateStarHistory({
+    repository: data.repository,
+    token: 'test-token',
+    dataPath,
+    outputPath,
+    now: new Date('2026-07-14T23:59:59Z'),
+    fetchImpl: async () => new Response(JSON.stringify({ stargazers_count: 152 }), { status: 200 })
+  })
+
+  assert.equal(changed, false)
+  assert.equal(await readFile(dataPath, 'utf8'), json)
+  assert.equal(await readFile(outputPath, 'utf8'), svg)
+})
+
+test('rendered description uses star count history rather than cumulative wording', () => {
+  const svg = renderStarHistorySvg({
+    repository: 'zszz3/agent-session-search',
+    series: [{ date: '2026-07-13', count: 152 }, { date: '2026-07-14', count: 151 }]
+  })
+  assert.match(svg, /GitHub star count history/)
+  assert.doesNotMatch(svg, /Cumulative GitHub stars/)
 })
 
 test('renderStarHistorySvg is deterministic and describes the final star count', () => {
