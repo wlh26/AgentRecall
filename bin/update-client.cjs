@@ -469,12 +469,18 @@ function globalPackageRoot(options = {}) {
   return path.join(npmRoot, "agent-session-search");
 }
 
+function nodeSubprocessEnvironment(baseEnvironment = {}) {
+  const environment = { ...process.env, ...baseEnvironment };
+  if (process.versions.electron) environment.ELECTRON_RUN_AS_NODE = "1";
+  else delete environment.ELECTRON_RUN_AS_NODE;
+  return environment;
+}
+
 async function ensureInstalledElectron(options = {}) {
   const packagePath = options.packagePath || globalPackageRoot({ npmCommand: options.npmCommand });
   const electronModulePath = path.join(packagePath, "node_modules", "electron");
   const installScript = path.join(electronModulePath, "install.js");
-  const environment = { ...process.env, ...options.env };
-  delete environment.ELECTRON_RUN_AS_NODE;
+  const environment = nodeSubprocessEnvironment(options.env);
   const run = options.execFileImpl || execFileAsync;
   const timeout = options.timeoutMs ?? 5 * 60_000;
   const validationScript = [
