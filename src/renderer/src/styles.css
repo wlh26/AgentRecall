@@ -4671,6 +4671,10 @@ select:focus-visible {
   gap: 12px;
 }
 
+.remote-sync-settings-body > .supabase-setup-guide {
+  margin: 0;
+}
+
 .remote-sync-master-toggle {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border-subtle));
   background: color-mix(in srgb, var(--accent-soft) 45%, var(--panel-bg));

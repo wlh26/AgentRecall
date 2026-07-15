@@ -269,4 +269,10 @@ describe("stylesheet theme contract", () => {
     expect(warning).toMatch(/border-color:\s*color-mix\([^;]*var\(--running-text\)/);
     expect(warning).not.toContain("--running-border");
   });
+
+  it("keeps the nested remote-session setup guide aligned with the other settings cards", () => {
+    const nestedGuide = stylesheet.match(/\.remote-sync-settings-body\s*>\s*\.supabase-setup-guide\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(nestedGuide).toMatch(/margin:\s*0/);
+  });
 });
