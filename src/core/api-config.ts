@@ -314,7 +314,7 @@ function fieldWasSaved(value: string | undefined): boolean {
 }
 
 function normalizeProviderPresetId(value: string | undefined): ApiProviderPresetId {
-  return API_PROVIDER_PRESETS.some((preset) => preset.id === value) ? (value as ApiProviderPresetId) : "codexzh";
+  return API_PROVIDER_PRESETS.some((preset) => preset.id === value) ? (value as ApiProviderPresetId) : "custom";
 }
 
 function normalizeClaudeProviderPresetId(value: string | undefined): ClaudeApiProviderPresetId {

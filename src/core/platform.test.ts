@@ -395,7 +395,7 @@ describe("API settings", () => {
       }),
     ).toEqual({
       activeProvider: "custom",
-      customProviderId: "codexzh",
+      customProviderId: "custom",
       customProviderName: "codexzh",
       customBaseUrl: "https://api.example.com/v1",
       customApiKey: "sk-test",

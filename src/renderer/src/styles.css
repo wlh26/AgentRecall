@@ -71,6 +71,9 @@
   --running-text: #a45013;
   --success-bg: #e6f4ef;
   --success-text: #096b4b;
+  --trend-up: #c24130;
+  --trend-down: #096b4b;
+  --trend-new: #6d5dfc;
 
   --radius: 10px;
   --radius-sm: 7px;
@@ -150,6 +153,9 @@
   --running-text: #f4b86e;
   --success-bg: rgba(52, 199, 154, 0.15);
   --success-text: #4fd6ad;
+  --trend-up: #f0795f;
+  --trend-down: #4fd6ad;
+  --trend-new: #c4b5fd;
 }
 
 * {
@@ -503,6 +509,9 @@ select:focus-visible {
   font-size: 15px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
 }
 
 .stats-breakdown {
@@ -532,6 +541,40 @@ select:focus-visible {
   font-family: var(--mono);
   font-size: 10.5px;
   font-style: normal;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stats-breakdown em > span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+}
+
+.stats-trend {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  opacity: 0.78;
+}
+
+.stats-trend.up {
+  color: var(--trend-up);
+}
+
+.stats-trend.down {
+  color: var(--trend-down);
+}
+
+.stats-trend.new {
+  color: var(--trend-new);
+}
+
+.stats-trend.neutral {
+  color: var(--text-faint);
 }
 
 .quota-panel {
@@ -3540,7 +3583,8 @@ select:focus-visible {
 }
 
 .update-about-pane {
-  justify-items: center;
+  justify-items: stretch;
+  align-items: start;
   gap: 16px;
   padding: 12px 4px 4px;
 }
@@ -3804,7 +3848,7 @@ select:focus-visible {
   display: flex;
   align-items: center;
   gap: 12px;
-  width: min(100%, 520px);
+  width: min(100%, 560px);
   min-height: 72px;
   padding: 14px 17px;
   border: 1px solid var(--border);
@@ -3865,6 +3909,7 @@ select:focus-visible {
 
 .update-about-actions {
   display: flex;
+  width: min(100%, 560px);
   justify-content: center;
 }
 
@@ -4709,6 +4754,10 @@ select:focus-visible {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
   gap: 6px;
+}
+
+.api-provider-switch--compact {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .api-provider-switch button {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { Eye, EyeOff, X } from "lucide-react";
 import {
@@ -17,6 +17,56 @@ import type { SettingsFeedback } from "../app-types";
 import { localize, type LanguageMode } from "../language";
 
 const SUMMARY_API_PROVIDER_PRESETS = API_PROVIDER_PRESETS.filter((preset) => preset.id !== "codexzh");
+
+function buildSummaryDraftFromSettings(settings: AppSettings | null): ApiConfig {
+  const summary = settings?.summaryApiConfig;
+  const codex = settings?.apiConfig;
+  if (codex?.activeProvider === "custom" && (codex.customBaseUrl.trim() || codex.customModel.trim() || codex.customApiKey.trim())) {
+    return {
+      ...(summary ?? defaultApiConfig),
+      ...codex,
+      activeProvider: "custom",
+      customProviderId: "custom",
+    };
+  }
+
+  const claude = settings?.claudeApiConfig;
+  if (claude?.activeProvider === "custom" && (claude.customBaseUrl.trim() || claude.customModel.trim() || claude.customApiKey.trim())) {
+    return {
+      ...(summary ?? defaultApiConfig),
+      activeProvider: "custom",
+      customProviderId: "custom",
+      customProviderName: claude.customProviderName.trim() || "Custom Claude",
+      customBaseUrl: claude.customBaseUrl,
+      customApiKey: claude.customApiKey,
+      customModel: claude.customModel,
+      customApiFormat: claude.customApiFormat === "openai_chat" || claude.customApiFormat === "openai_responses"
+        ? claude.customApiFormat
+        : "openai_chat",
+    };
+  }
+
+  if (summary?.customBaseUrl.trim() || summary?.customModel.trim() || summary?.customApiKey.trim()) return summary;
+
+  return summary ?? { ...defaultApiConfig };
+}
+
+function buildSummarySourceFromSettings(settings: AppSettings | null): AppSettings["summarySource"] {
+  const codex = settings?.apiConfig;
+  if (codex?.activeProvider === "custom" && (codex.customBaseUrl.trim() || codex.customModel.trim() || codex.customApiKey.trim())) {
+    return "custom";
+  }
+
+  const claude = settings?.claudeApiConfig;
+  if (claude?.activeProvider === "custom" && (claude.customBaseUrl.trim() || claude.customModel.trim() || claude.customApiKey.trim())) {
+    return "custom";
+  }
+
+  const summary = settings?.summaryApiConfig;
+  if (summary?.customBaseUrl.trim() || summary?.customModel.trim() || summary?.customApiKey.trim()) return "custom";
+
+  return settings?.summarySource ?? "custom";
+}
 
 export function ApiConfigDialog({
   settings,
@@ -45,7 +95,8 @@ export function ApiConfigDialog({
   const [draftClaudeApiConfig, setDraftClaudeApiConfig] = useState<ClaudeApiConfig>(
     () => settings?.claudeApiConfig ?? { ...defaultClaudeApiConfig },
   );
-  const [draftSummaryApiConfig, setDraftSummaryApiConfig] = useState<ApiConfig>(() => settings?.summaryApiConfig ?? { ...defaultApiConfig });
+  const [draftSummaryApiConfig, setDraftSummaryApiConfig] = useState<ApiConfig>(() => buildSummaryDraftFromSettings(settings));
+  const [draftSummarySource, setDraftSummarySource] = useState<AppSettings["summarySource"]>(() => buildSummarySourceFromSettings(settings));
   const [codexConfig, setCodexConfig] = useState<CodexConfigSnapshot | null>(null);
   const [codexConfigError, setCodexConfigError] = useState("");
   const [selectedCodexConfigProviderId, setSelectedCodexConfigProviderId] = useState("");
@@ -65,6 +116,11 @@ export function ApiConfigDialog({
   const selectedClaudePreset =
     CLAUDE_API_PROVIDER_PRESETS.find((preset) => preset.id === draftClaudeApiConfig.customProviderId) ?? CLAUDE_API_PROVIDER_PRESETS[0];
   const customClaudeName = selectedClaudePreset?.label ?? (draftClaudeApiConfig.customProviderName || "Claude Code");
+  const activeSummarySource = draftSummarySource;
+  const selectedSummaryPreset = useMemo(
+    () => SUMMARY_API_PROVIDER_PRESETS.find((preset) => preset.id === draftSummaryApiConfig.customProviderId) ?? SUMMARY_API_PROVIDER_PRESETS[SUMMARY_API_PROVIDER_PRESETS.length - 1],
+    [draftSummaryApiConfig.customProviderId],
+  );
 
   const hydrateDraftFromCodexConfig = (snapshot: CodexConfigSnapshot) => {
     const activeProvider = snapshot.providers.find((provider) => provider.id === snapshot.activeProviderId);
@@ -209,7 +265,7 @@ export function ApiConfigDialog({
     if (!preset) return;
     const apiKey = await window.sessionSearch.getApiProviderKey("summary", preset.id).catch(() => "");
     if (selectionId !== summaryApiPresetSelectionRef.current) return;
-    const current = settings?.summaryApiConfig ?? draftSummaryApiConfig;
+    const current = draftSummaryApiConfig;
     const next: ApiConfig = preset.id === "custom"
       ? {
           ...current,
@@ -229,14 +285,15 @@ export function ApiConfigDialog({
           customApiFormat: preset.apiFormat,
         };
     setDraftSummaryApiConfig(next);
-    onSettingsChange({ summarySource: "custom", summaryApiConfig: next });
+    setDraftSummarySource("custom");
     setShowSummaryApiKey(false);
   };
 
   useEffect(() => {
     setDraftApiConfig(settings?.apiConfig ?? { ...defaultApiConfig });
     setDraftClaudeApiConfig(settings?.claudeApiConfig ?? { ...defaultClaudeApiConfig });
-    setDraftSummaryApiConfig(settings?.summaryApiConfig ?? { ...defaultApiConfig });
+    setDraftSummaryApiConfig(buildSummaryDraftFromSettings(settings));
+    setDraftSummarySource(buildSummarySourceFromSettings(settings));
   }, [settings?.apiConfig, settings?.claudeApiConfig, settings?.summaryApiConfig]);
 
   useEffect(() => {
@@ -274,7 +331,7 @@ export function ApiConfigDialog({
       runCodexAction("save");
     }
     else if (apiTarget === "claude") onSettingsChange({ claudeApiConfig: draftClaudeApiConfig });
-    else onSettingsChange({ summarySource: "custom", summaryApiConfig: draftSummaryApiConfig });
+    else onSettingsChange({ summarySource: draftSummarySource, summaryApiConfig: draftSummaryApiConfig });
   };
 
   const applyDraft = () => {
@@ -566,10 +623,10 @@ export function ApiConfigDialog({
                 </p>
               </header>
               <div
-                className="api-provider-switch"
+                className="api-provider-switch api-provider-switch--compact"
                 role="group"
                 aria-label={l("Claude Code provider", "Claude Code 供应商")}
-                data-provider-labels="Custom DeepSeek GLM LongCat Kimi MiMo"
+                data-provider-labels="Claude Official Custom DeepSeek GLM LongCat Kimi MiMo"
               >
                 <button
                   type="button"
@@ -753,27 +810,27 @@ export function ApiConfigDialog({
               <div className="api-provider-switch summary-provider-switch" role="group" aria-label={l("AI summary & search source", "AI 摘要与搜索来源")}>
                 <button
                   type="button"
-                  className={settings?.summarySource === "codex" ? "active" : ""}
+                  className={activeSummarySource === "codex" ? "active" : ""}
                   disabled={!settings || saving}
-                  onClick={() => onSettingsChange({ summarySource: "codex" })}
+                  onClick={() => setDraftSummarySource("codex")}
                 >
                   <strong>Codex</strong>
-                  <span>{l("Use the current ~/.codex config via an ephemeral Codex call.", "通过 ephemeral Codex 调用使用当前 ~/.codex 配置。")}</span>
+                  <span>{l("Prefer the current local Codex config.", "优先使用当前本机 Codex 配置。")}</span>
                 </button>
                 <button
                   type="button"
-                  className={settings?.summarySource === "claude" ? "active" : ""}
+                  className={activeSummarySource === "claude" ? "active" : ""}
                   disabled={!settings || saving}
-                  onClick={() => onSettingsChange({ summarySource: "claude" })}
+                  onClick={() => setDraftSummarySource("claude")}
                 >
                   <strong>Claude Code</strong>
-                  <span>{l("Use the current ~/.claude settings, then delete the temporary local session.", "使用当前 ~/.claude 配置，摘要后删除临时本地 session。")}</span>
+                  <span>{l("Fallback to the current local Claude config.", "回退到当前本机 Claude 配置。")}</span>
                 </button>
                 {SUMMARY_API_PROVIDER_PRESETS.map((preset) => (
                   <button
                     key={preset.id}
                     type="button"
-                    className={settings?.summarySource === "custom" && draftSummaryApiConfig.customProviderId === preset.id ? "active" : ""}
+                    className={activeSummarySource === "custom" && draftSummaryApiConfig.customProviderId === preset.id ? "active" : ""}
                     disabled={!settings || saving}
                     onClick={() => void selectSummaryPreset(preset.id)}
                   >
@@ -782,8 +839,19 @@ export function ApiConfigDialog({
                   </button>
                 ))}
               </div>
-              {settings?.summarySource === "custom" ? (
+              {activeSummarySource === "custom" ? (
                 <>
+                  <div className="api-config-note">
+                    {selectedSummaryPreset?.id === "custom"
+                      ? l(
+                          "The Custom draft is filled from your current local Codex config first, then local Claude config if Codex is unavailable. It only saves when you click Save summary settings.",
+                          "Custom 草稿会先填充当前本机 Codex 配置；如果没有，再回退到本机 Claude 配置。只有点击“保存摘要设置”才会保存。",
+                        )
+                      : l(
+                          "Preset selection only updates the draft. Click Save summary settings to save it.",
+                          "选择供应商后只会更新草稿；点击“保存摘要设置”后才会保存。",
+                        )}
+                  </div>
                   <label className="settings-field">
                     <div className="settings-field-text">
                       <span className="settings-field-title">Base URL</span>

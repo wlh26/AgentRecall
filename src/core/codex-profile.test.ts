@@ -408,9 +408,9 @@ describe("codex profile switching", () => {
     });
   });
 
-  it("normalizes preset ids and falls back to CodexZH", () => {
+  it("normalizes preset ids and falls back to Custom", () => {
     expect(normalizeApiConfig({ activeProvider: "custom", customProviderId: "deepseek" }).customProviderId).toBe("deepseek");
-    expect(normalizeApiConfig({ activeProvider: "custom", customProviderId: "missing" }).customProviderId).toBe("codexzh");
+    expect(normalizeApiConfig({ activeProvider: "custom", customProviderId: "missing" }).customProviderId).toBe("custom");
   });
 
   it("merges common providers into the active Codex config without overwriting unrelated sections", async () => {

@@ -93,10 +93,13 @@ describe("theme controls", () => {
     expect(apiDialog).toContain("setDraftApiConfig");
     expect(apiDialog).toContain("draftClaudeApiConfig");
     expect(apiDialog).toContain("setDraftClaudeApiConfig");
+    expect(apiDialog).toContain("draftSummarySource");
     expect(apiDialog).toContain("selectApiPreset");
     expect(apiDialog).toContain("selectClaudeApiPreset");
+    expect(apiDialog).toContain("selectSummaryPreset");
     expect(apiDialog).toContain("onSettingsChange({ apiConfig: next })");
     expect(apiDialog).toContain("onSettingsChange({ claudeApiConfig: draftClaudeApiConfig })");
+    expect(apiDialog).toContain("onSettingsChange({ summarySource: draftSummarySource, summaryApiConfig: draftSummaryApiConfig })");
     expect(apiDialog).toContain("onApplyToCodex(next)");
     expect(apiDialog).toContain("onApplyToClaude(draftClaudeApiConfig)");
     expect(apiDialog).toMatch(/Write to Codex config/);
@@ -133,7 +136,7 @@ describe("theme controls", () => {
     expect(apiConfigDialogSource).not.toContain('preset.id !== "custom" && preset.id !== "codexzh"');
     expect(summarySection).toContain("SUMMARY_API_PROVIDER_PRESETS.map");
     expect(summarySection).toContain("summary-provider-switch");
-    expect(summarySection).toContain('settings?.summarySource === "custom"');
+    expect(summarySection).toContain('activeSummarySource === "custom"');
     expect(summarySection).not.toMatch(/CodexZH/);
   });
 
@@ -153,11 +156,38 @@ describe("theme controls", () => {
     const selectApiPreset = apiDialog.slice(apiDialog.indexOf("const selectApiPreset"), apiDialog.indexOf("const selectClaudeApiPreset"));
     const selectClaudeApiPresetStart = apiDialog.indexOf("const selectClaudeApiPreset");
     const selectClaudeApiPreset = apiDialog.slice(selectClaudeApiPresetStart, apiDialog.indexOf("  useEffect", selectClaudeApiPresetStart));
+    const selectSummaryPresetStart = apiDialog.indexOf("const selectSummaryPreset");
+    const selectSummaryPreset = apiDialog.slice(selectSummaryPresetStart, apiDialog.indexOf("  useEffect", selectSummaryPresetStart));
 
     expect(selectApiPreset).toContain('getApiProviderKey("codex", preset.id)');
     expect(selectApiPreset).toContain("customApiKey: apiKey");
     expect(selectClaudeApiPreset).toContain('getApiProviderKey("claude", preset.id)');
     expect(selectClaudeApiPreset).toContain("customApiKey: apiKey");
+    expect(selectSummaryPreset).toContain('getApiProviderKey("summary", preset.id)');
+    expect(selectSummaryPreset).not.toContain("onSettingsChange({ summarySource: \"custom\", summaryApiConfig: next })");
+  });
+
+  it("hydrates summary custom draft from local Codex first, then Claude", () => {
+    const apiDialog = apiConfigDialogSource;
+
+    expect(apiDialog).toContain("function buildSummaryDraftFromSettings");
+    expect(apiDialog).toContain("function buildSummarySourceFromSettings");
+    expect(apiDialog).toContain('if (codex?.activeProvider === "custom"');
+    expect(apiDialog).toContain('if (claude?.activeProvider === "custom"');
+    expect(apiDialog).toContain('...codex');
+    expect(apiDialog).toContain('customProviderId: "custom"');
+    expect(apiDialog).toContain('setDraftSummaryApiConfig(buildSummaryDraftFromSettings(settings))');
+    expect(apiDialog).toContain('setDraftSummarySource(buildSummarySourceFromSettings(settings))');
+    expect(apiDialog).toContain("优先使用当前本机 Codex 配置");
+    expect(apiDialog).toContain("回退到当前本机 Claude 配置");
+    expect(apiDialog).toContain("api-provider-switch--compact");
+  });
+
+  it("keeps unknown Codex providers as Custom instead of forcing CodexZH", () => {
+    const apiConfigSource = readFileSync(new URL("../../core/api-config.ts", import.meta.url), "utf8");
+
+    expect(apiConfigSource).toContain('return API_PROVIDER_PRESETS.some((preset) => preset.id === value) ? (value as ApiProviderPresetId) : "custom";');
+    expect(apiConfigSource).not.toContain('return API_PROVIDER_PRESETS.some((preset) => preset.id === value) ? (value as ApiProviderPresetId) : "codexzh";');
   });
 
   it("opens settings with the standard preferences shortcut", () => {
