@@ -1292,22 +1292,12 @@ select:focus-visible {
 }
 
 .toolbar {
-  --toolbar-filter-track: 388px;
   position: relative;
   z-index: 5;
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(0, min(var(--toolbar-filter-track), 48vw)) auto;
+  grid-template-columns: minmax(180px, 1fr) minmax(0, max-content) auto;
   align-items: center;
   gap: 8px;
-}
-
-.toolbar[data-scope-count="1"] {
-  --toolbar-filter-track: 556px;
-}
-
-.toolbar[data-scope-count="2"],
-.toolbar[data-scope-count="3"] {
-  --toolbar-filter-track: 636px;
 }
 
 .toolbar-filters {
@@ -1315,10 +1305,11 @@ select:focus-visible {
   --live-filter-width: 166px;
   --date-filter-width: 214px;
   display: flex;
-  width: 100%;
+  width: fit-content;
   min-width: 0;
-  max-width: 100%;
+  max-width: min(636px, 48vw);
   flex-wrap: nowrap;
+  justify-self: end;
   justify-content: flex-start;
   align-items: center;
   gap: var(--toolbar-filter-gap);
@@ -1567,8 +1558,9 @@ select:focus-visible {
   display: inline-flex;
   align-items: center;
   height: 38px;
-  width: var(--date-filter-width);
-  flex: 0 0 var(--date-filter-width);
+  width: fit-content;
+  max-width: var(--date-filter-width);
+  flex: 0 0 auto;
   gap: 2px;
   padding: 2px 4px;
   border: 1px solid var(--border);
@@ -1608,22 +1600,15 @@ select:focus-visible {
 }
 
 .scope-filter {
+  --scope-filter-max: 240px;
   position: relative;
   display: inline-flex;
   align-items: center;
+  width: fit-content;
+  max-width: var(--scope-filter-max);
   height: 38px;
   min-width: 0;
-  width: clamp(
-    0px,
-    calc(100% - var(--live-filter-width) - var(--date-filter-width) - (var(--toolbar-filter-gap) * 2)),
-    240px
-  );
-  max-width: 100%;
-  flex: 0 1 clamp(
-    0px,
-    calc(100% - var(--live-filter-width) - var(--date-filter-width) - (var(--toolbar-filter-gap) * 2)),
-    240px
-  );
+  flex: 0 1 auto;
   gap: 4px;
   padding: 3px;
   border: 1px solid var(--accent-line);
@@ -1632,42 +1617,7 @@ select:focus-visible {
 }
 
 .scope-filter[data-count="1"] {
-  width: clamp(
-    0px,
-    calc(100% - var(--live-filter-width) - var(--date-filter-width) - (var(--toolbar-filter-gap) * 2)),
-    160px
-  );
-  flex-basis: clamp(
-    0px,
-    calc(100% - var(--live-filter-width) - var(--date-filter-width) - (var(--toolbar-filter-gap) * 2)),
-    160px
-  );
-}
-
-.scope-filter[data-count="2"] {
-  width: clamp(
-    0px,
-    calc(100% - var(--live-filter-width) - var(--date-filter-width) - (var(--toolbar-filter-gap) * 2)),
-    240px
-  );
-  flex-basis: clamp(
-    0px,
-    calc(100% - var(--live-filter-width) - var(--date-filter-width) - (var(--toolbar-filter-gap) * 2)),
-    240px
-  );
-}
-
-.scope-filter[data-count="3"] {
-  width: clamp(
-    0px,
-    calc(100% - var(--live-filter-width) - var(--date-filter-width) - (var(--toolbar-filter-gap) * 2)),
-    240px
-  );
-  flex-basis: clamp(
-    0px,
-    calc(100% - var(--live-filter-width) - var(--date-filter-width) - (var(--toolbar-filter-gap) * 2)),
-    240px
-  );
+  --scope-filter-max: 160px;
 }
 
 .scope-filter-chip {
