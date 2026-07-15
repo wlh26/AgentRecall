@@ -304,15 +304,20 @@ export async function syncRemoteEnvironment(
       (summary) => !isOptionalRemoteSource(summarySource(summary)) || enabledOptionalSources.has(summarySource(summary)),
     );
     for (const summary of enabledSummaries) {
+      const session = remoteSummaryToIndexedSession(environment, summary);
       store.upsertIndexedSessionSummary(
-        remoteSummaryToIndexedSession(environment, summary),
+        session,
         summary.messageCount,
         summary.tokenEvents,
         summary.messageEvents,
       );
+      deleteLegacyRemoteSessionRecord(store, session);
     }
     const loaded = loadRemoteSessionPayloads(environment, payloads);
-    for (const item of loaded) store.upsertIndexedSession(item.session, item.messages, item.tokenEvents, item.traceEvents);
+    for (const item of loaded) {
+      store.upsertIndexedSession(item.session, item.messages, item.tokenEvents, item.traceEvents);
+      deleteLegacyRemoteSessionRecord(store, item.session);
+    }
     store.updateEnvironmentSyncState(environment.id, "watching", { lastSyncedAt: Date.now(), lastError: null });
     return { environmentId: environment.id, indexed: enabledSummaries.length + loaded.length, error: null };
   } catch (error) {
@@ -320,6 +325,12 @@ export async function syncRemoteEnvironment(
     store.updateEnvironmentSyncState(environment.id, "error", { lastError: message });
     throw error;
   }
+}
+
+function deleteLegacyRemoteSessionRecord(store: SessionStore, session: IndexedSession): void {
+  const legacyFamily = session.source === "codex-cli" ? "codex" : session.source === "claude-cli" ? "claude" : null;
+  if (!legacyFamily || !session.environmentId) return;
+  store.deleteSessionRecord(`ssh:${session.environmentId}:${legacyFamily}:${session.rawId}`);
 }
 
 function remoteSummaryToIndexedSession(environment: SessionEnvironment, summary: RemoteSessionSummaryPayload): IndexedSession {
@@ -425,9 +436,9 @@ export async function fetchRemoteSessionFilePayload(
   options: RemoteSessionFileFetchOptions = {},
 ): Promise<RemoteSessionFilePayload> {
   const runSsh = options.runSsh ?? runSystemSsh;
-  const output = await runSsh(environment, buildRemoteFileFetchCommand(session));
+  const output = await runSsh(environment, buildRemoteFileFetchCommand(session.filePath));
   const payloads = decodeRemotePayload(output);
-  const expectedKind = remoteFileKindForSource(session.source);
+  const expectedKind = session.source === "codex-cli" || session.source === "codex-app" || session.source === "codex-internal" ? "codex-session" : "claude-project";
   const payload = payloads.find((item) => item.path === session.filePath && item.kind === expectedKind) ?? payloads[0];
   if (!payload) throw new Error("Remote session file fetch returned no payload.");
   return payload;
@@ -445,27 +456,22 @@ export async function fetchRemoteSessionMessagePage(
   return decodeRemoteMessagePage(output);
 }
 
-function buildRemoteFileFetchCommand(session: SessionSearchResult): string {
-  const request = {
-    path: session.filePath,
-    kind: remoteFileKindForSource(session.source),
-    source: session.source,
-  };
+function buildRemoteFileFetchCommand(filePath: string): string {
   const script = String.raw`import base64, json
 from pathlib import Path
 
-request = __REQUEST_JSON__
-path = Path(request["path"])
+path = Path(base64.b64decode("__PATH_B64__").decode("utf-8"))
 stat = path.stat()
 content = path.read_bytes()
+suffix = path.suffix.lower()
+kind = "claude-project" if ".claude/projects" in str(path) or suffix == ".json" else "codex-session"
 print(json.dumps({
-  "kind": request["kind"],
-  "source": request["source"],
+  "kind": kind,
   "path": str(path),
   "mtimeMs": int(stat.st_mtime * 1000),
   "size": stat.st_size,
   "contentBase64": base64.b64encode(content).decode("ascii"),
-}, ensure_ascii=False))`.replace("__REQUEST_JSON__", () => JSON.stringify(request));
+}, ensure_ascii=False))`.replace("__PATH_B64__", Buffer.from(filePath, "utf-8").toString("base64"));
   return buildPythonBase64Command(script);
 }
 
@@ -1192,11 +1198,11 @@ except Exception:
   pass
 codex_titles = {
   "codex-cli": load_codex_titles(".codex"),
-  "tcodex-cli": load_codex_titles(".tcodex"),
+  __OPTIONAL_CODEX_TITLE_INDEXES__
 }
 claude_indexes = {
   "claude-cli": load_claude_index(".claude"),
-  "tclaude-cli": load_claude_index(".tclaude"),
+  __OPTIONAL_CLAUDE_INDEXES__
 }
 for _mtime, kind, source, path, _size in sorted(candidates, key=lambda item: item[0], reverse=True)[:MAX_SESSION_FILES]:
   try:
@@ -1217,9 +1223,17 @@ function buildRemoteCollectorCommand(enabledOptionalSources: SessionSource[]): s
     "codebuddy-cli": '("codebuddy-project", "codebuddy-cli", home / ".codebuddy" / "projects", "*.jsonl")',
   };
   const optionalSources = enabledOptionalSources.filter((source) => source in descriptors);
+  const optionalCodexTitleIndexes = optionalSources.includes("tcodex-cli")
+    ? '"tcodex-cli": load_codex_titles(".tcodex"),'
+    : "";
+  const optionalClaudeIndexes = optionalSources.includes("tclaude-cli")
+    ? '"tclaude-cli": load_claude_index(".tclaude"),'
+    : "";
   const script = REMOTE_COLLECTOR_SCRIPT
     .replace("__ENABLED_OPTIONAL_SOURCES__", JSON.stringify(optionalSources))
-    .replace("__OPTIONAL_SOURCE_DESCRIPTORS__", optionalSources.map((source) => descriptors[source]).join(",\n  "));
+    .replace("__OPTIONAL_SOURCE_DESCRIPTORS__", optionalSources.map((source) => descriptors[source]).join(",\n  "))
+    .replace("__OPTIONAL_CODEX_TITLE_INDEXES__", optionalCodexTitleIndexes)
+    .replace("__OPTIONAL_CLAUDE_INDEXES__", optionalClaudeIndexes);
   return buildPythonBase64Command(script);
 }
 

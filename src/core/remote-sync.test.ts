@@ -157,6 +157,8 @@ describe("remote sync", () => {
     });
     expect(store.getSession("ssh:ssh-devbox:tclaude-cli:optional-tclaude")).toBeNull();
     expect(disabledScript).not.toContain('"tclaude-cli", home / ".tclaude"');
+    expect(disabledScript).not.toContain('load_claude_index(".tclaude")');
+    expect(disabledScript).not.toContain('load_codex_titles(".tcodex")');
 
     let enabledScript = "";
     await syncRemoteEnvironment(store, environment, {
@@ -168,7 +170,103 @@ describe("remote sync", () => {
     });
     expect(store.getSession("ssh:ssh-devbox:tclaude-cli:optional-tclaude")).not.toBeNull();
     expect(enabledScript).toContain('"tclaude-cli", home / ".tclaude"');
+    expect(enabledScript).toContain('load_claude_index(".tclaude")');
+    expect(enabledScript).not.toContain('load_codex_titles(".tcodex")');
     store.close();
+  });
+
+  it("loads TCodex titles only when the TCodex source is enabled", async () => {
+    const store = createInMemoryStore();
+    const environment = upsertSshEnvironment(store);
+    let script = "";
+    await syncRemoteEnvironment(store, environment, {
+      enabledOptionalSources: ["tcodex-cli"],
+      runSsh: async (_environment, command) => {
+        script = decodeCollectorScript(command);
+        return "";
+      },
+    });
+    expect(script).toContain('load_codex_titles(".tcodex")');
+    expect(script).not.toContain('load_claude_index(".tclaude")');
+    store.close();
+  });
+
+  it.each([
+    ["codex-session", "codex-cli", "codex"],
+    ["claude-project", "claude-cli", "claude"],
+  ] as const)("removes the legacy %s SSH key after indexing the source-level replacement", async (kind, source, legacyFamily) => {
+    const store = createInMemoryStore();
+    const environment = upsertSshEnvironment(store);
+    const rawId = `legacy-${legacyFamily}`;
+    const legacyKey = `ssh:ssh-devbox:${legacyFamily}:${rawId}`;
+    store.upsertIndexedSession({
+      sessionKey: legacyKey,
+      rawId,
+      source,
+      projectPath: "/repo",
+      filePath: `/home/me/.${legacyFamily}/legacy.jsonl`,
+      originalTitle: "Legacy",
+      firstQuestion: "old",
+      timestamp: 1,
+      fileMtimeMs: 1,
+      fileSize: 1,
+      prUrl: null,
+      prNumber: null,
+      environmentId: environment.id,
+      environmentKind: environment.kind,
+      environmentLabel: environment.label,
+    }, []);
+    await syncRemoteEnvironment(store, environment, {
+      runSsh: async () => `${JSON.stringify({
+        kind,
+        source,
+        path: `/home/me/.${legacyFamily}/replacement.jsonl`,
+        mtimeMs: 2,
+        size: 2,
+        rawId,
+        projectPath: "/repo",
+        timestamp: 2,
+        originalTitle: "Replacement",
+        firstQuestion: "new",
+        messageCount: 1,
+      })}\n`,
+    });
+    expect(store.getSession(`ssh:ssh-devbox:${source}:${rawId}`)).not.toBeNull();
+    expect(store.getSession(legacyKey)).toBeNull();
+    store.close();
+  });
+
+  it("continues collecting valid sources when optional directories are missing or contain damaged JSONL", async () => {
+    const store = createInMemoryStore();
+    const environment = upsertSshEnvironment(store);
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-remote-damaged-optional-"));
+    try {
+      const codexDir = path.join(tempHome, ".codex", "sessions");
+      const tclaudeDir = path.join(tempHome, ".tclaude", "projects", "repo");
+      fs.mkdirSync(codexDir, { recursive: true });
+      fs.mkdirSync(tclaudeDir, { recursive: true });
+      fs.writeFileSync(path.join(codexDir, "valid.jsonl"), JSON.stringify({
+        type: "session_meta",
+        timestamp: "2026-07-15T10:00:00Z",
+        payload: { id: "valid-base", cwd: "/repo" },
+      }));
+      fs.writeFileSync(path.join(tclaudeDir, "damaged.jsonl"), "{not-json\n");
+      let script = "";
+      await syncRemoteEnvironment(store, environment, {
+        enabledOptionalSources: ["tclaude-cli", "codebuddy-cli"],
+        runSsh: async (_environment, command) => {
+          script = decodeCollectorScript(command);
+          return "";
+        },
+      });
+      const output = execFileSync("python3", ["-c", script], { encoding: "utf8", env: { ...process.env, HOME: tempHome } });
+      expect(output.trim().split(/\r?\n/).map((line) => JSON.parse(line) as { rawId: string })).toEqual(
+        expect.arrayContaining([expect.objectContaining({ rawId: "valid-base" })]),
+      );
+    } finally {
+      store.close();
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
   });
 
   it("limits the merged remote collector result to 2500 files across all enabled sources", async () => {
@@ -751,40 +849,6 @@ describe("remote sync", () => {
     ]);
   });
 
-  it("pages CodeBuddy messages with the shared remote parser", async () => {
-    const store = createInMemoryStore();
-    const environment = upsertSshEnvironment(store);
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-remote-codebuddy-page-"));
-    const filePath = path.join(tempDir, "codebuddy.jsonl");
-    try {
-      fs.writeFileSync(filePath, [
-        JSON.stringify({ type: "ai-title", aiTitle: "title", sessionId: "codebuddy-page" }),
-        JSON.stringify({ type: "message", role: "user", content: [{ type: "input_text", text: "question" }], timestamp: "2026-07-15T10:00:00Z" }),
-        JSON.stringify({ type: "message", role: "assistant", content: [{ type: "output_text", text: "answer" }], timestamp: "2026-07-15T10:00:01Z" }),
-      ].join("\n"));
-      const messages = await fetchRemoteSessionMessagePage(
-        environment,
-        { source: "codebuddy-cli", filePath } as SessionSearchResult,
-        0,
-        10,
-        {
-          runSsh: async (_environment, command) => {
-            const script = decodeCollectorScript(command);
-            expect(script).toContain('"kind":"codebuddy"');
-            return execFileSync("python3", ["-c", script], { encoding: "utf8" });
-          },
-        },
-      );
-      expect(messages).toEqual([
-        { index: 0, role: "user", content: "question", timestamp: "2026-07-15T10:00:00Z" },
-        { index: 1, role: "assistant", content: "answer", timestamp: "2026-07-15T10:00:01Z" },
-      ]);
-    } finally {
-      store.close();
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
-
   it("rejects invalid remote payload protocol output and records sync error", async () => {
     const store = createInMemoryStore();
     const environment = upsertSshEnvironment(store);
@@ -956,27 +1020,6 @@ describe("remote sync", () => {
     expect(payload.content).toContain("on-demand-codex");
   });
 
-  it("fetches CodeBuddy remote files with their source-specific payload kind", async () => {
-    const store = createInMemoryStore();
-    const environment = upsertSshEnvironment(store);
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-remote-codebuddy-file-"));
-    const filePath = path.join(tempDir, "codebuddy.jsonl");
-    fs.writeFileSync(filePath, JSON.stringify({ type: "message", role: "user", content: "question" }));
-    try {
-      const payload = await fetchRemoteSessionFilePayload(
-        environment,
-        { source: "codebuddy-cli", filePath } as SessionSearchResult,
-        {
-          runSsh: async (_environment, command) => execFileSync("python3", ["-c", decodeCollectorScript(command)], { encoding: "utf8" }),
-        },
-      );
-      expect(payload).toMatchObject({ kind: "codebuddy-project", source: "codebuddy-cli", path: filePath });
-    } finally {
-      store.close();
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
-
   it("summarizes failed remote protocol stdout instead of leaking session JSON", () => {
     const stdout = `${JSON.stringify({
       kind: "codex-session",
@@ -993,6 +1036,21 @@ describe("remote sync", () => {
     expect(message).not.toContain("/home/alice");
     expect(message).not.toContain("contentBase64");
     expect(message.length).toBeLessThan(500);
+  });
+
+  it("summarizes failed CodeBuddy payload stdout without leaking session data", () => {
+    const stdout = `${JSON.stringify({
+      kind: "codebuddy-project",
+      source: "codebuddy-cli",
+      path: "/home/alice/.codebuddy/projects/private.jsonl",
+      contentBase64: "cHJpdmF0ZQ==",
+      mtimeMs: 1,
+      size: 7,
+    })}\n`;
+    const message = formatRemoteSyncProcessError({ killed: true, code: 255 }, stdout, "");
+    expect(message).toContain("remote produced");
+    expect(message).not.toContain("/home/alice");
+    expect(message).not.toContain("contentBase64");
   });
 
   it("builds noninteractive ssh args before the destination terminator and exposes a finite exec timeout", () => {
