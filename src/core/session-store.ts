@@ -598,9 +598,9 @@ export class SessionStore {
           this.db.prepare(`UPDATE ${table} SET session_key = ? WHERE session_key = ?`).run(targetKey, legacyKey);
         }
       } else {
-        // The source-level target is authoritative when both records exist. Only fill nullable
-        // user state, keep its explicit booleans, retain the newest activity timestamps, and
-        // union tags so a stale legacy duplicate cannot overwrite newer target choices.
+        // The source-level target is authoritative when both records exist. Fill nullable user
+        // state, OR booleans because false may only be the schema default, retain the newest
+        // activity timestamps, and union tags without losing legacy-only user state.
         this.db
           .prepare(
             `UPDATE sessions SET
@@ -647,6 +647,52 @@ export class SessionStore {
              SELECT ?, tag_id FROM session_tags WHERE session_key = ?`,
           )
           .run(targetKey, legacyKey);
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO messages (session_key, message_index, role, content, timestamp)
+             SELECT ?, message_index, role, content, timestamp FROM messages WHERE session_key = ?`,
+          )
+          .run(targetKey, legacyKey);
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO message_events (session_key, message_index, timestamp)
+             SELECT ?, message_index, timestamp FROM message_events WHERE session_key = ?`,
+          )
+          .run(targetKey, legacyKey);
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO token_events (
+               session_key, dedupe_key, timestamp, input_tokens, output_tokens,
+               cached_input_tokens, reasoning_output_tokens, total_tokens
+             )
+             SELECT ?, dedupe_key, timestamp, input_tokens, output_tokens,
+               cached_input_tokens, reasoning_output_tokens, total_tokens
+             FROM token_events WHERE session_key = ?`,
+          )
+          .run(targetKey, legacyKey);
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO trace_events (
+               session_key, trace_index, kind, source, title, detail,
+               timestamp, call_id, event_type, status
+             )
+             SELECT ?, trace_index, kind, source, title, detail,
+               timestamp, call_id, event_type, status
+             FROM trace_events WHERE session_key = ?`,
+          )
+          .run(targetKey, legacyKey);
+        this.db
+          .prepare(
+            `UPDATE sessions SET
+               message_count = (SELECT COUNT(*) FROM messages WHERE session_key = ?),
+               input_tokens = (SELECT COALESCE(SUM(input_tokens), 0) FROM token_events WHERE session_key = ?),
+               output_tokens = (SELECT COALESCE(SUM(output_tokens), 0) FROM token_events WHERE session_key = ?),
+               cached_input_tokens = (SELECT COALESCE(SUM(cached_input_tokens), 0) FROM token_events WHERE session_key = ?),
+               reasoning_output_tokens = (SELECT COALESCE(SUM(reasoning_output_tokens), 0) FROM token_events WHERE session_key = ?),
+               total_tokens = (SELECT COALESCE(SUM(total_tokens), 0) FROM token_events WHERE session_key = ?)
+             WHERE session_key = ?`,
+          )
+          .run(targetKey, targetKey, targetKey, targetKey, targetKey, targetKey, targetKey);
         this.db.prepare("DELETE FROM sessions WHERE session_key = ?").run(legacyKey);
       }
 

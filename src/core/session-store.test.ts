@@ -132,6 +132,103 @@ describe("SessionStore", () => {
     store.close();
   });
 
+  it("merges legacy dependent data into an existing target without overwriting target conflicts", () => {
+    const store = createInMemoryStore();
+    const legacyKey = "ssh:ssh-devbox:codex:shared-session";
+    const targetKey = "ssh:ssh-devbox:codex-cli:shared-session";
+    const baseTime = new Date("2026-07-15T10:00:00Z").getTime();
+    const targetMessages: SessionMessage[] = [
+      { role: "assistant", content: "target conflict", timestamp: "2026-07-15T10:00:00Z", index: 0 },
+      { role: "assistant", content: "target only", timestamp: "2026-07-15T10:02:00Z", index: 2 },
+    ];
+    const legacyMessages: SessionMessage[] = [
+      { role: "user", content: "legacy conflict", timestamp: "2026-07-15T10:00:30Z", index: 0 },
+      { role: "user", content: "legacy only", timestamp: "2026-07-15T10:01:00Z", index: 1 },
+    ];
+    const targetTrace: SessionTraceEvent[] = [
+      { index: 0, kind: "event", source: "codex", title: "target conflict", detail: "target", timestamp: "2026-07-15T10:00:00Z" },
+      { index: 2, kind: "event", source: "codex", title: "target only", detail: "target", timestamp: "2026-07-15T10:02:00Z" },
+    ];
+    const legacyTrace: SessionTraceEvent[] = [
+      { index: 0, kind: "event", source: "codex", title: "legacy conflict", detail: "legacy", timestamp: "2026-07-15T10:00:30Z" },
+      { index: 1, kind: "event", source: "codex", title: "legacy only", detail: "legacy", timestamp: "2026-07-15T10:01:00Z" },
+    ];
+    store.upsertIndexedSession(
+      sampleSession({ sessionKey: targetKey, rawId: "shared-session", environmentId: "ssh-devbox", timestamp: baseTime }),
+      targetMessages,
+      [
+        { dedupeKey: "shared", timestamp: baseTime, inputTokens: 100, outputTokens: 0, cachedInputTokens: 0, reasoningOutputTokens: 0, totalTokens: 100 },
+        { dedupeKey: "target-only", timestamp: baseTime + 2_000, inputTokens: 20, outputTokens: 0, cachedInputTokens: 0, reasoningOutputTokens: 0, totalTokens: 20 },
+      ],
+      targetTrace,
+    );
+    store.upsertIndexedSession(
+      sampleSession({ sessionKey: legacyKey, rawId: "shared-session", environmentId: "ssh-devbox", timestamp: baseTime + 1_000 }),
+      legacyMessages,
+      [
+        { dedupeKey: "shared", timestamp: baseTime + 500, inputTokens: 999, outputTokens: 0, cachedInputTokens: 0, reasoningOutputTokens: 0, totalTokens: 999 },
+        { dedupeKey: "legacy-only", timestamp: baseTime + 1_000, inputTokens: 30, outputTokens: 0, cachedInputTokens: 0, reasoningOutputTokens: 0, totalTokens: 30 },
+      ],
+      legacyTrace,
+    );
+    const db = (store as unknown as { db: InstanceType<typeof DatabaseSync> }).db;
+    db.prepare("UPDATE sessions SET custom_title = ?, favorited = 1 WHERE session_key = ?").run("legacy title", legacyKey);
+    db.prepare("UPDATE sessions SET pinned = 1 WHERE session_key = ?").run(targetKey);
+    store.addTag(legacyKey, "legacy-tag");
+    store.addTag(targetKey, "target-tag");
+    const legacyMigration = migrationRecord({ id: "legacy-history", sourceSessionKey: legacyKey, createdAt: 100 });
+    const targetMigration = migrationRecord({ id: "target-history", sourceSessionKey: targetKey, createdAt: 200 });
+    store.recordSessionMigration(legacyMigration);
+    store.recordSessionMigration(targetMigration);
+
+    expect(store.migrateSessionKeyPreservingUserState(legacyKey, targetKey)).toBe(true);
+
+    expect(store.getSession(legacyKey)).toBeNull();
+    expect(store.getMessages(legacyKey)).toEqual([]);
+    expect(store.getTraceEvents(legacyKey)).toEqual([]);
+    for (const table of ["message_events", "token_events"] as const) {
+      expect(db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE session_key = ?`).get(legacyKey)).toEqual({ count: 0 });
+    }
+    expect(store.getMessages(targetKey)).toEqual([
+      targetMessages[0],
+      legacyMessages[1],
+      targetMessages[1],
+    ]);
+    expect(store.getTraceEvents(targetKey)).toEqual([
+      targetTrace[0],
+      legacyTrace[1],
+      targetTrace[1],
+    ]);
+    expect(db.prepare("SELECT message_index, timestamp FROM message_events WHERE session_key = ? ORDER BY message_index").all(targetKey)).toEqual([
+      { message_index: 0, timestamp: baseTime },
+      { message_index: 1, timestamp: baseTime + 60_000 },
+      { message_index: 2, timestamp: baseTime + 120_000 },
+    ]);
+    expect(db.prepare("SELECT dedupe_key, input_tokens FROM token_events WHERE session_key = ? ORDER BY dedupe_key").all(targetKey)).toEqual([
+      { dedupe_key: "legacy-only", input_tokens: 30 },
+      { dedupe_key: "shared", input_tokens: 100 },
+      { dedupe_key: "target-only", input_tokens: 20 },
+    ]);
+    expect(store.getSession(targetKey)).toMatchObject({
+      customTitle: "legacy title",
+      favorited: true,
+      pinned: true,
+      messageCount: 3,
+      tokenUsage: expect.objectContaining({ inputTokens: 150, totalTokens: 150 }),
+      tags: ["legacy-tag", "target-tag"],
+    });
+    expect(store.listSessionMigrations(targetKey)).toEqual([
+      targetMigration,
+      { ...legacyMigration, sourceSessionKey: targetKey },
+    ]);
+    expect(store.getStats({ period: "today" }, new Date("2026-07-15T12:00:00Z").getTime()).total).toMatchObject({
+      messageCount: 3,
+      inputTokens: 150,
+      totalTokens: 150,
+    });
+    store.close();
+  });
+
   it("returns structured message hits and metadata-only match reasons", () => {
     const store = createInMemoryStore();
     store.upsertIndexedSession(
