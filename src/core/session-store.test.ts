@@ -64,6 +64,74 @@ const traceEvents: SessionTraceEvent[] = [
 ];
 
 describe("SessionStore", () => {
+  it("atomically migrates a legacy key with all dependent data and migration history", () => {
+    const store = createInMemoryStore();
+    const legacyKey = "ssh:ssh-devbox:codex:legacy-all-data";
+    const targetKey = "ssh:ssh-devbox:codex-cli:legacy-all-data";
+    const eventTime = new Date("2026-07-15T10:00:00Z").getTime();
+    const legacyMessages: SessionMessage[] = [
+      { role: "user", content: "legacy question", timestamp: "2026-07-15T10:00:00Z", index: 0 },
+      { role: "assistant", content: "legacy answer", timestamp: "2026-07-15T10:01:00Z", index: 1 },
+    ];
+    const legacyTrace: SessionTraceEvent[] = [{
+      index: 0,
+      kind: "event",
+      source: "codex",
+      title: "legacy trace",
+      detail: "trace detail",
+      timestamp: "2026-07-15T10:02:00Z",
+    }];
+    const tokenEvent = {
+      timestamp: eventTime,
+      dedupeKey: "legacy-token-event",
+      inputTokens: 10,
+      outputTokens: 5,
+      cachedInputTokens: 2,
+      reasoningOutputTokens: 1,
+      totalTokens: 18,
+    };
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: legacyKey,
+        rawId: "legacy-all-data",
+        environmentId: "ssh-devbox",
+        timestamp: eventTime,
+        fileMtimeMs: eventTime,
+      }),
+      legacyMessages,
+      [tokenEvent],
+      legacyTrace,
+    );
+    store.addTag(legacyKey, "legacy-tag");
+    const migrations = [
+      migrationRecord({ id: "legacy-migration-a", sourceSessionKey: legacyKey, createdAt: 100 }),
+      migrationRecord({ id: "legacy-migration-b", sourceSessionKey: legacyKey, createdAt: 200 }),
+    ];
+    for (const migration of migrations) store.recordSessionMigration(migration);
+
+    expect(store.migrateSessionKeyPreservingUserState(legacyKey, targetKey)).toBe(true);
+
+    expect(store.getSession(legacyKey)).toBeNull();
+    expect(store.getMessages(legacyKey)).toEqual([]);
+    expect(store.getTraceEvents(legacyKey)).toEqual([]);
+    expect(store.listSessionMigrations(legacyKey)).toEqual([]);
+    expect(store.getSession(targetKey)).toMatchObject({ tags: ["legacy-tag"], messageCount: 2 });
+    expect(store.getMessages(targetKey)).toEqual(legacyMessages);
+    expect(store.getTraceEvents(targetKey)).toEqual(legacyTrace);
+    expect(store.listSessionMigrations(targetKey)).toEqual(
+      [...migrations].reverse().map((migration) => ({ ...migration, sourceSessionKey: targetKey })),
+    );
+    expect(store.getStats({ period: "today" }, new Date("2026-07-15T12:00:00Z").getTime()).total).toMatchObject({
+      messageCount: 2,
+      inputTokens: 10,
+      outputTokens: 5,
+      cachedInputTokens: 2,
+      reasoningOutputTokens: 1,
+      totalTokens: 18,
+    });
+    store.close();
+  });
+
   it("returns structured message hits and metadata-only match reasons", () => {
     const store = createInMemoryStore();
     store.upsertIndexedSession(

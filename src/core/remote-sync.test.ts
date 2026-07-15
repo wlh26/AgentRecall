@@ -260,7 +260,10 @@ describe("remote sync", () => {
     store.close();
   });
 
-  it("keeps existing target user state while merging legacy tags", async () => {
+  it.each([
+    [true, false],
+    [false, true],
+  ])("OR-merges legacy %s and target %s boolean state while keeping target metadata", async (legacyState, targetState) => {
     const store = createInMemoryStore();
     const environment = upsertSshEnvironment(store);
     const rawId = "existing-target";
@@ -285,16 +288,16 @@ describe("remote sync", () => {
     }, []);
     seed(legacyKey, "Legacy");
     store.setCustomTitle(legacyKey, "Legacy custom");
-    store.setFavorited(legacyKey, true);
-    store.setPinned(legacyKey, true);
-    store.setHidden(legacyKey, true);
+    store.setFavorited(legacyKey, legacyState);
+    store.setPinned(legacyKey, legacyState);
+    store.setHidden(legacyKey, legacyState);
     store.setAiSummary(legacyKey, "Legacy summary", "legacy-model");
     store.addTag(legacyKey, "legacy-tag");
     seed(targetKey, "Target");
     store.setCustomTitle(targetKey, "Target custom");
-    store.setFavorited(targetKey, false);
-    store.setPinned(targetKey, false);
-    store.setHidden(targetKey, false);
+    store.setFavorited(targetKey, targetState);
+    store.setPinned(targetKey, targetState);
+    store.setHidden(targetKey, targetState);
     store.setAiSummary(targetKey, "Target summary", "target-model");
     store.addTag(targetKey, "target-tag");
 
@@ -316,9 +319,9 @@ describe("remote sync", () => {
 
     expect(store.getSession(targetKey)).toMatchObject({
       customTitle: "Target custom",
-      favorited: false,
-      pinned: false,
-      hidden: false,
+      favorited: true,
+      pinned: true,
+      hidden: true,
       aiSummary: "Target summary",
       tags: ["legacy-tag", "target-tag"],
     });

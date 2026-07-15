@@ -567,7 +567,7 @@ export class SessionStore {
     this.transaction(() => {
       const legacy = this.db
         .prepare(
-          `SELECT custom_title, last_opened_at, last_resumed_at,
+          `SELECT custom_title, favorited, pinned, hidden, last_opened_at, last_resumed_at,
              ai_summary, ai_summary_model, ai_summary_at, ai_summary_basis
            FROM sessions WHERE session_key = ?`,
         )
@@ -575,6 +575,9 @@ export class SessionStore {
         | Pick<
           SessionRow,
           | "custom_title"
+          | "favorited"
+          | "pinned"
+          | "hidden"
           | "last_opened_at"
           | "last_resumed_at"
           | "ai_summary"
@@ -602,6 +605,9 @@ export class SessionStore {
           .prepare(
             `UPDATE sessions SET
                custom_title = COALESCE(custom_title, ?),
+               favorited = CASE WHEN favorited = 1 OR ? = 1 THEN 1 ELSE 0 END,
+               pinned = CASE WHEN pinned = 1 OR ? = 1 THEN 1 ELSE 0 END,
+               hidden = CASE WHEN hidden = 1 OR ? = 1 THEN 1 ELSE 0 END,
                last_opened_at = CASE
                  WHEN ? IS NULL THEN last_opened_at
                  WHEN last_opened_at IS NULL OR last_opened_at < ? THEN ?
@@ -620,6 +626,9 @@ export class SessionStore {
           )
           .run(
             legacy.custom_title,
+            legacy.favorited,
+            legacy.pinned,
+            legacy.hidden,
             legacy.last_opened_at,
             legacy.last_opened_at,
             legacy.last_opened_at,
@@ -641,6 +650,11 @@ export class SessionStore {
         this.db.prepare("DELETE FROM sessions WHERE session_key = ?").run(legacyKey);
       }
 
+      // Migration ids are globally unique while source_session_key is only indexed, so every
+      // historical row can move intact without collapsing duplicate migration attempts.
+      this.db
+        .prepare("UPDATE session_migrations SET source_session_key = ? WHERE source_session_key = ?")
+        .run(targetKey, legacyKey);
       this.db.prepare("DELETE FROM session_fts WHERE session_key IN (?, ?)").run(legacyKey, targetKey);
       this.refreshFtsForSession(targetKey);
       migrated = true;
