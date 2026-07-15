@@ -13,6 +13,8 @@
     "agent-session-search-setup-claude-statusline": "bin/setup-claude-statusline.cjs",
     "agent-session-search-skill-usage": "bin/skill-usage-record.cjs",
     "agent-session-search-setup-skill-usage-hook": "bin/setup-skill-usage-hook.cjs",
+    "agent-session-search-session-sync": "bin/session-sync-record.cjs",
+    "agent-session-search-setup-session-sync-hook": "bin/setup-session-sync-hook.cjs",
     "agent-session-search-mcp": "bin/agent-session-search-mcp.mjs",
     "agent-session-search-setup-mcp": "bin/setup-mcp.cjs"
   },

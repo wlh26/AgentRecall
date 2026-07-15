@@ -62,7 +62,7 @@ npm install -g https://github.com/zszz3/agent-session-search/releases/latest/dow
 npm install -g https://github.com/zszz3/agent-session-search/releases/download/v0.2.0/agent-session-search.tgz
 ```
 
-完整卸载请先运行 `agent-session-search uninstall` 清理本应用写入的 statusLine、usage hook、MCP 引用和缓存，再执行 `npm uninstall -g agent-session-search`；会话数据库、Supabase 配置和用户偏好会保留。
+完整卸载请先运行 `agent-session-search uninstall` 清理本应用写入的 statusLine、usage hook、会话同步 Hook、MCP 引用和缓存，再执行 `npm uninstall -g agent-session-search`；会话数据库、Supabase 配置和用户偏好会保留。
 
 ## 功能
 
@@ -77,7 +77,7 @@ npm install -g https://github.com/zszz3/agent-session-search/releases/download/v
 - **跨 Agent 迁移会话**：
   支持在 Claude Code、Codex、CodeBuddy、CodeWiz 及已启用的扩展 CLI 间迁移本地会话；远程恢复支持 Claude Code、Codex、CodeBuddy 和 CodeWiz。
 - **远程保存和跨设备恢复会话**：
-  支持使用自己的 Supabase 项目手动上传会话快照，在另一台设备搜索远程会话、查看完整详情，并恢复到 Claude Code / Codex / CodeBuddy 中继续工作。
+  支持使用自己的 Supabase 项目手动或自动上传会话快照，在另一台设备搜索远程会话、查看完整详情，并恢复到 Claude Code / Codex / CodeBuddy 中继续工作。
 - **统一查看 Agent 用量和额度**：
   统计今日、近 7 天、近 30 天和全部时间的各 Agent token 使用量；同时查看 Claude Code / Codex 的当前额度状态。
 - **统一管理 Skills 和 API Provider**：
@@ -112,10 +112,11 @@ CodeBuddy CLI、CodeWiz、TClaude、TCodex、Claude Code Internal、Codex Intern
 
 远程会话同步用于把本机某段会话保存到你自己的 Supabase 项目里。另一台设备配置同一个 Supabase URL 和 anon key 后，可以打开远程会话列表，搜索、按来源筛选、查看详情，并把远程会话恢复到本机任意支持的 Agent 中。比如设备 A 上传了一段 Codex 会话，设备 B 可以在远程会话列表里查看这段会话，并选择恢复到 Claude Code、Codex 或 CodeBuddy。
 
-当前版本按**单人使用、手动同步快照**设计：
+当前版本按**单人使用、由用户控制同步**设计：
 
 - 不做用户隔离，也不需要登录系统；默认使用你自己的 Supabase 项目和 anon key。
-- 不会自动后台同步。本地会话继续对话后，远程仍然是上次上传时的快照；需要再次点击上传才会更新远程版本。
+- 默认使用手动上传。也可以在设置中安装 Claude Code 与 Codex 会话 Hook；每轮回复完成后 Hook 只记录待同步会话，由常驻托盘的 App 按稳定内容 revision 更新云端。App 未运行时会在下次启动后继续处理。
+- 自动同步不会覆盖内容冲突；本地和云端都改变时仍需在同步窗口中人工选择处理方式。关闭远程会话同步或点击“移除 Hook”会清理本应用安装的 Hook，不会删除云端数据。
 - 同步窗口会同时读取全部可同步的本地会话和云端副本，显示“仅本地、待更新云端、已同步、云端较新、仅云端、内容冲突”；判断依据是稳定内容 revision，而不是设备路径、上传时间或修改时间。
 - 本地和云端都改变时会标记冲突，批量上传自动跳过；只有用户明确选择覆盖云端时才会覆盖。
 - 顶部支持全选当前结果、批量上传和批量删除云端副本。删除云端副本不会删除本地会话；恢复永远创建新的本地副本。
@@ -126,9 +127,10 @@ CodeBuddy CLI、CodeWiz、TClaude、TCodex、Claude Code Internal、Codex Intern
 
 1. 在 [Supabase Dashboard](https://supabase.com/dashboard) 创建或选择一个自己的项目。
 2. 在 Project Settings -> API 中复制 Project URL 和 anon key。
-3. 回到应用的 Settings -> Remote sync，填入 Supabase URL 和 anon key。
+3. 回到应用的 Settings -> Remote sync，开启远程会话同步，再填入 Supabase URL 和 anon key。
 4. 在“首次配置”中点击“复制最新 SQL”，再点击“打开 SQL Editor”；应用会直接打开当前 Supabase 项目的 SQL Editor。
-5. 粘贴并执行 SQL，回到应用开启远程同步。会话或 Skills 页面以后提示结构或权限需要更新时，按同样步骤执行对应页面提供的最新 SQL，再点击刷新即可。
+5. 粘贴并执行 SQL，回到应用即可手动上传和恢复。会话或 Skills 页面以后提示结构或权限需要更新时，按同样步骤执行对应页面提供的最新 SQL，再点击刷新即可。
+6. 如需自动同步，点击“安装 Hook”。Codex 首次使用时会提示审查 Hook，请在 Codex 中执行 `/hooks` 并确认信任；Claude Code 与 Codex 的其他 Hook 配置会保留。
 
 首次配置 SQL 会一次初始化会话和 Skills 同步；其中会话同步会创建：
 

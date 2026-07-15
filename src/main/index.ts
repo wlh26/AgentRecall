@@ -117,6 +117,13 @@ import {
 import { buildSkillDiffSnapshot, type SkillContentSnapshot, type SkillDiffSnapshot } from "../core/skill-diff";
 import { buildCombinedSupabaseSetupSql, supabaseSqlEditorUrl } from "../core/supabase-setup";
 import {
+  clearSessionSyncQueue,
+  coalesceSessionSyncQueueEvents,
+  readSessionSyncQueue,
+  removeSessionSyncQueueFiles,
+  type SessionSyncHookStatus,
+} from "../core/session-sync-queue";
+import {
   listSkillUsageSources,
   readSkillUsageSourceEvents,
   usageForSkill,
@@ -125,6 +132,7 @@ import {
 import { buildSshArgs, readUserSshConfig } from "../core/ssh-config";
 import {
   AUTO_INDEX_REFRESH_INTERVAL_MS,
+  AUTO_SESSION_SYNC_QUEUE_INTERVAL_MS,
   AUTO_SKILL_USAGE_REFRESH_INTERVAL_MS,
   INITIAL_INDEX_DELAY_MS,
   INITIAL_SKILL_USAGE_REFRESH_DELAY_MS,
@@ -180,6 +188,16 @@ interface SkillUsageHookSetup {
 }
 function loadSkillUsageHookSetup(): SkillUsageHookSetup {
   return requireCjs(SKILL_USAGE_HOOK_SETUP_PATH) as SkillUsageHookSetup;
+}
+
+const SESSION_SYNC_HOOK_SETUP_PATH = path.join(__dirname, "../../bin/setup-session-sync-hook.cjs");
+interface SessionSyncHookSetup {
+  installSessionSyncHooks(options?: Record<string, unknown>): { status: string; detail?: string };
+  uninstallSessionSyncHooks(options?: Record<string, unknown>): { status: string; detail?: string };
+  sessionSyncHookStatus(options?: Record<string, unknown>): { installed: boolean; claude: boolean; codex: boolean; error?: string };
+}
+function loadSessionSyncHookSetup(): SessionSyncHookSetup {
+  return requireCjs(SESSION_SYNC_HOOK_SETUP_PATH) as SessionSyncHookSetup;
 }
 
 const MCP_SETUP_PATH = path.join(__dirname, "../../bin/setup-mcp.cjs");
@@ -766,6 +784,10 @@ let activeIndexRun: Promise<IndexStatus> | null = null;
 let autoIndexTimer: ReturnType<typeof setInterval> | null = null;
 let initialSkillUsageTimer: ReturnType<typeof setTimeout> | null = null;
 let autoSkillUsageTimer: ReturnType<typeof setInterval> | null = null;
+let autoSessionSyncQueueTimer: ReturnType<typeof setInterval> | null = null;
+let sessionSyncQueueRunning = false;
+let sessionSyncHookLastProcessedAt: number | null = null;
+let sessionSyncHookLastError: string | null = null;
 let registeredGlobalShortcut: string | null = null;
 let remoteWatchManager: RemoteWatchManager | null = null;
 let remoteEnvironmentLifecycle: RemoteEnvironmentLifecycle | null = null;
@@ -1614,6 +1636,83 @@ async function runIndexSync(): Promise<IndexStatus> {
   return activeIndexRun;
 }
 
+function getSessionSyncHookStatus(): SessionSyncHookStatus {
+  const hook = loadSessionSyncHookSetup().sessionSyncHookStatus();
+  const queue = readSessionSyncQueue();
+  return {
+    installed: hook.installed,
+    claude: hook.claude,
+    codex: hook.codex,
+    pending: queue.events.length,
+    lastProcessedAt: sessionSyncHookLastProcessedAt,
+    lastError: hook.error || sessionSyncHookLastError,
+  };
+}
+
+async function drainSessionSyncQueue(): Promise<void> {
+  if (sessionSyncQueueRunning || !getSettings().remoteSyncEnabled) return;
+  const queued = readSessionSyncQueue();
+  removeSessionSyncQueueFiles(queued.invalidFiles);
+  const coalesced = coalesceSessionSyncQueueEvents(queued.events);
+  removeSessionSyncQueueFiles(coalesced.supersededFiles);
+  if (coalesced.events.length === 0) return;
+
+  sessionSyncQueueRunning = true;
+  sessionSyncHookLastError = null;
+  try {
+    await runIndexSync();
+    const localSessions = store.searchSessions({ limit: 100_000, excludeSubagents: false })
+      .filter((session) => isLocalSessionEnvironment(session));
+
+    for (const event of coalesced.events) {
+      if (!getSettings().remoteSyncEnabled || !loadSessionSyncHookSetup().sessionSyncHookStatus().installed) break;
+      const session = localSessions.find((candidate) =>
+        migrationAgentForSource(candidate.source) === event.agent &&
+        ((event.transcriptPath && path.resolve(candidate.filePath) === path.resolve(event.transcriptPath)) || candidate.rawId === event.sessionId),
+      );
+      if (!session) continue;
+      if (session.isSubagent) {
+        removeSessionSyncQueueFiles([event.filePath]);
+        continue;
+      }
+
+      try {
+        await ensureRemoteSessionDetailsLoaded(session.sessionKey);
+        const binding = store.getSessionSyncBindingForLocalKey(session.sessionKey);
+        const built = buildRemoteSessionUploadFromStore(store, session.sessionKey, 0, binding?.remoteSessionId);
+        if (binding && binding.lastLocalRevision === built.payload.content_hash) {
+          removeSessionSyncQueueFiles([event.filePath]);
+          sessionSyncHookLastProcessedAt = Date.now();
+          continue;
+        }
+        await uploadSessionToRemote(session.sessionKey);
+        removeSessionSyncQueueFiles([event.filePath]);
+        sessionSyncHookLastProcessedAt = Date.now();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sessionSyncHookLastError = message;
+        if (message.includes("Both local and cloud copies changed")) {
+          removeSessionSyncQueueFiles([event.filePath]);
+        }
+      }
+    }
+  } finally {
+    sessionSyncQueueRunning = false;
+  }
+}
+
+function startAutoSessionSyncQueue(): void {
+  if (autoSessionSyncQueueTimer) return;
+  autoSessionSyncQueueTimer = setInterval(() => void drainSessionSyncQueue(), AUTO_SESSION_SYNC_QUEUE_INTERVAL_MS);
+  void drainSessionSyncQueue();
+}
+
+function stopAutoSessionSyncQueue(): void {
+  if (!autoSessionSyncQueueTimer) return;
+  clearInterval(autoSessionSyncQueueTimer);
+  autoSessionSyncQueueTimer = null;
+}
+
 const loadCachedLiveSessionSnapshot = createCachedLiveSessionSnapshotLoader();
 
 let summaryBackfillRunning = false;
@@ -2158,6 +2257,12 @@ function registerIpc(): void {
         `Shortcut ${globalShortcutLabel(next.globalShortcut)} could not be registered. It may be used by another app.`,
       );
     }
+    if ("remoteSyncEnabled" in settings && !next.remoteSyncEnabled) {
+      const result = loadSessionSyncHookSetup().uninstallSessionSyncHooks();
+      if (result.status === "error") throw new Error(result.detail || "Could not remove the session sync hooks.");
+      clearSessionSyncQueue();
+      sessionSyncHookLastError = null;
+    }
     persistApiProviderKeysFromUpdate(settings, next);
     settingsStore.set(withoutApiProviderKeys(next));
     if ("autoCheckUpdates" in settings && app.isPackaged) {
@@ -2202,6 +2307,24 @@ function registerIpc(): void {
   ipcMain.handle("remote-session:status", () => getRemoteSessionStatus());
   ipcMain.handle("remote-session:copy-setup-sql", () => {
     clipboard.writeText(buildRemoteSessionSetupSql());
+  });
+  ipcMain.handle("remote-session:hook-status", () => getSessionSyncHookStatus());
+  ipcMain.handle("remote-session:install-hooks", () => {
+    const settings = getSettings();
+    if (!settings.remoteSyncEnabled || !settings.remoteSyncSupabaseUrl || !settings.remoteSyncSupabaseAnonKey) {
+      throw new Error("Enable remote session sync and configure Supabase before installing hooks.");
+    }
+    const result = loadSessionSyncHookSetup().installSessionSyncHooks();
+    if (result.status === "error") throw new Error(result.detail || "Could not configure the session sync hooks.");
+    void drainSessionSyncQueue();
+    return getSessionSyncHookStatus();
+  });
+  ipcMain.handle("remote-session:uninstall-hooks", () => {
+    const result = loadSessionSyncHookSetup().uninstallSessionSyncHooks();
+    if (result.status === "error") throw new Error(result.detail || "Could not remove the session sync hooks.");
+    clearSessionSyncQueue();
+    sessionSyncHookLastError = null;
+    return getSessionSyncHookStatus();
   });
   ipcMain.handle("remote-session:upload", (_event, sessionKey: string, force?: boolean) => uploadSessionToRemote(sessionKey, force ?? false));
   ipcMain.handle("remote-session:list", (_event, query?: string) => listRemoteSessions(query ?? ""));
@@ -2375,6 +2498,7 @@ app.whenReady().then(() => {
   setTimeout(() => void runIndexSync(), INITIAL_INDEX_DELAY_MS);
   startAutoIndexRefresh();
   startAutoSkillUsageRefresh();
+  startAutoSessionSyncQueue();
   if (app.isPackaged && getSettings().autoCheckUpdates) setTimeout(() => void refreshAppUpdateStatus(false), 1_000);
 });
 
@@ -2390,6 +2514,7 @@ app.on("before-quit", () => {
   if (app.isPackaged) void loadUpdateClient().clearAppProcess(process.pid).catch(() => undefined);
   stopAutoIndexRefresh();
   stopAutoSkillUsageRefresh();
+  stopAutoSessionSyncQueue();
   remoteEnvironmentLifecycle?.stopAll();
   void stopCodexChatProxy();
   globalShortcut.unregisterAll();

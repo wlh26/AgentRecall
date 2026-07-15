@@ -29,10 +29,10 @@
 **Interfaces:**
 - Produces: `installSessionSyncHooks(options)`, `uninstallSessionSyncHooks(options)`, `sessionSyncHookStatus(options)`, and `buildSessionSyncEvent(input, agent)`.
 
-- [ ] Write tests asserting idempotent Claude/Codex installation, preservation of foreign hooks, complete removal, and valid event creation.
-- [ ] Run `npx vitest run src/core/setup-session-sync-hook.test.ts src/core/session-sync-record.test.ts` and confirm the missing modules fail.
-- [ ] Implement the two dependency-free CommonJS scripts and package bin entries.
-- [ ] Re-run the focused tests and confirm they pass.
+- [x] Write tests asserting idempotent Claude/Codex installation, preservation of foreign hooks, complete removal, and valid event creation.
+- [x] Run `npx vitest run src/core/setup-session-sync-hook.test.ts src/core/session-sync-record.test.ts` and confirm the missing modules fail.
+- [x] Implement the two dependency-free CommonJS scripts and package bin entries.
+- [x] Re-run the focused tests and confirm they pass.
 
 ### Task 2: Background queue consumer
 
@@ -45,10 +45,10 @@
 - Consumes: event files from `~/.agent-session-search/session-sync-queue` and existing `uploadSessionToRemote(sessionKey)`.
 - Produces: `readSessionSyncQueue()`, `removeSessionSyncQueueEvent()`, and the main-process periodic drain.
 
-- [ ] Write tests for malformed events, duplicate session coalescing, removal, and retained failures.
-- [ ] Run `npx vitest run src/core/session-sync-queue.test.ts` and confirm it fails because the queue module is missing.
-- [ ] Implement queue parsing and add a bounded main-process drain that refreshes the index once, excludes subagents, skips unchanged revisions, and retains retryable failures.
-- [ ] Re-run queue and remote-session tests.
+- [x] Write tests for malformed events, duplicate session coalescing, removal, and retained failures.
+- [x] Run `npx vitest run src/core/session-sync-queue.test.ts` and confirm it fails because the queue module is missing.
+- [x] Implement queue parsing and add a bounded main-process drain that refreshes the index once, excludes subagents, skips unchanged revisions, and retains retryable failures.
+- [x] Re-run queue and remote-session tests.
 
 ### Task 3: Settings hierarchy and Hook controls
 
@@ -61,10 +61,10 @@
 **Interfaces:**
 - Produces renderer APIs for Hook status/install/remove and a top-level remote-sync toggle.
 
-- [ ] Write a source-level UI test asserting the enable toggle precedes and gates the connection fields and that Hook install/remove controls exist.
-- [ ] Run the focused test and confirm it fails on the current layout.
-- [ ] Move the enable card to the top, conditionally render the remaining settings, and make disabling remove hooks before saving `remoteSyncEnabled: false`.
-- [ ] Re-run the focused UI test and typecheck.
+- [x] Write a source-level UI test asserting the enable toggle precedes and gates the connection fields and that Hook install/remove controls exist.
+- [x] Run the focused test and confirm it fails on the current layout.
+- [x] Move the enable card to the top, conditionally render the remaining settings, and make disabling remove hooks before saving `remoteSyncEnabled: false`.
+- [x] Re-run the focused UI test and typecheck.
 
 ### Task 4: Uninstall, documentation, and verification
 
@@ -77,7 +77,7 @@
 **Interfaces:**
 - `agent-session-search uninstall` removes both session hooks and queued events without removing Supabase settings or cloud data.
 
-- [ ] Add a failing uninstall test using a temporary HOME.
-- [ ] Extend uninstall and user documentation with automatic session sync and Codex trust instructions.
-- [ ] Run focused tests, `npm run typecheck`, `npm test`, `npm run build`, and `npm run release-note:check`.
-- [ ] Confirm no test processes or temporary files remain.
+- [x] Add a failing uninstall test using a temporary HOME.
+- [x] Extend uninstall and user documentation with automatic session sync and Codex trust instructions.
+- [x] Run focused tests, `npm run typecheck`, `npm test`, `npm run build`, and `npm run release-note:check`.
+- [x] Confirm no test processes or temporary files remain.

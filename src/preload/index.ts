@@ -17,6 +17,7 @@ import type {
   SessionSyncItem,
 } from "../core/remote-session-sync";
 import type { ResumeRouteResult } from "../core/resume-router";
+import type { SessionSyncHookStatus } from "../core/session-sync-queue";
 import type { TraceEventQueryOptions } from "../core/session-store";
 import type { RemoteSkill, SkillSyncBatchResult, SkillSyncInstallResult, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../core/skill-sync";
 import type { DeleteInstalledSkillResult, InstalledSkillsSnapshot } from "../core/skill-manager";
@@ -122,6 +123,9 @@ const api = {
   openSupabaseSqlEditor: (target: "sessions" | "skills"): Promise<void> => ipcRenderer.invoke("supabase:open-sql-editor", target),
   getRemoteSessionStatus: (): Promise<RemoteSessionStatus> => ipcRenderer.invoke("remote-session:status"),
   copyRemoteSessionSetupSql: (): Promise<void> => ipcRenderer.invoke("remote-session:copy-setup-sql"),
+  getSessionSyncHookStatus: (): Promise<SessionSyncHookStatus> => ipcRenderer.invoke("remote-session:hook-status"),
+  installSessionSyncHooks: (): Promise<SessionSyncHookStatus> => ipcRenderer.invoke("remote-session:install-hooks"),
+  uninstallSessionSyncHooks: (): Promise<SessionSyncHookStatus> => ipcRenderer.invoke("remote-session:uninstall-hooks"),
   uploadRemoteSession: (sessionKey: string, force?: boolean): Promise<RemoteSessionUploadResult> => ipcRenderer.invoke("remote-session:upload", sessionKey, force),
   listRemoteSessions: (query?: string): Promise<RemoteSessionListItem[]> => ipcRenderer.invoke("remote-session:list", query),
   listSessionSyncItems: (): Promise<SessionSyncItem[]> => ipcRenderer.invoke("remote-session:sync-items"),

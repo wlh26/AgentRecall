@@ -6,6 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { uninstallClaudeStatuslineBridge } = require("./install-claude-statusline.cjs");
 const { uninstallSkillUsageHook } = require("./setup-skill-usage-hook.cjs");
+const { uninstallSessionSyncHooks } = require("./setup-session-sync-hook.cjs");
 const { acquireUpdateLock, stopRunningApp, waitForUpdateCompletion } = require("./update-client.cjs");
 const mcp = require("./setup-mcp.cjs");
 
@@ -28,6 +29,10 @@ async function uninstall(options = {}) {
     if (usageHook.status === "error") errors.push(`Skill usage hook: ${usageHook.detail}`);
     else messages.push(usageHook.status === "removed" ? "Removed the Agent-Session-Search skill usage hook." : "Skill usage hook did not need changes.");
 
+    const sessionHooks = uninstallSessionSyncHooks({ homeDir });
+    if (sessionHooks.status === "error") errors.push(`Session sync hooks: ${sessionHooks.detail}`);
+    else messages.push(sessionHooks.status === "removed" ? "Removed the Agent-Session-Search session sync hooks." : "Session sync hooks did not need changes.");
+
     try {
       messages.push(...mcp.run(true, { homeDir }));
     } catch (error) {
@@ -42,6 +47,11 @@ async function uninstall(options = {}) {
     ];
     for (const filePath of cacheFiles) {
       try { fs.rmSync(filePath, { force: true }); } catch (error) { errors.push(`Cache ${filePath}: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+    try {
+      fs.rmSync(path.join(homeDir, ".agent-session-search", "session-sync-queue"), { recursive: true, force: true });
+    } catch (error) {
+      errors.push(`Session sync queue: ${error instanceof Error ? error.message : String(error)}`);
     }
     messages.push("Removed Agent-Session-Search integration caches.");
     messages.push("Session database, Supabase settings, update preference, and other user preferences were kept.");

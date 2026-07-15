@@ -4666,6 +4666,24 @@ select:focus-visible {
   min-width: 0;
 }
 
+.remote-sync-settings-body {
+  display: grid;
+  gap: 12px;
+}
+
+.remote-sync-master-toggle {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--panel-bg));
+}
+
+.session-sync-hook-field {
+  align-items: center;
+}
+
+.session-sync-hook-field .settings-field-sub.error {
+  color: var(--danger);
+}
+
 /* A single card that stacks a toggle row with a dependent sub-row (e.g. its threshold). */
 .settings-field.settings-stack {
   flex-direction: column;

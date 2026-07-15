@@ -55,6 +55,7 @@ import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import type { MigrationTargetSettings } from "../../core/migration-targets";
 import type { RemoteHealthReport } from "../../core/remote-health";
 import type { RemoteSessionDetailSnapshot } from "../../core/remote-session-sync";
+import type { SessionSyncHookStatus } from "../../core/session-sync-queue";
 import type { TraceEventQueryOptions } from "../../core/session-store";
 import type { RemoteSkill, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../../core/skill-sync";
 import type { InstalledSkill, InstalledSkillsSnapshot } from "../../core/skill-manager";
@@ -535,6 +536,8 @@ export function App(): ReactElement {
   const [diagnosingEnvironmentId, setDiagnosingEnvironmentId] = useState<string | null>(null);
   const [skillHookInstalled, setSkillHookInstalled] = useState<boolean | null>(null);
   const [skillHookBusy, setSkillHookBusy] = useState(false);
+  const [sessionHookStatus, setSessionHookStatus] = useState<SessionSyncHookStatus | null>(null);
+  const [sessionHookBusy, setSessionHookBusy] = useState(false);
   const [pendingPersonalSources, setPendingPersonalSources] = useState<Record<PendingSourceKey, boolean>>({
     claude: false,
     codex: false,
@@ -911,6 +914,7 @@ export function App(): ReactElement {
   useEffect(() => {
     if (!settingsOpen) return;
     void window.sessionSearch.getSkillUsageHookStatus().then(setSkillHookInstalled).catch(() => setSkillHookInstalled(false));
+    void window.sessionSearch.getSessionSyncHookStatus().then(setSessionHookStatus).catch(() => setSessionHookStatus(null));
   }, [settingsOpen]);
 
   const toggleSkillUsageHook = useCallback(async (enabled: boolean) => {
@@ -930,6 +934,29 @@ export function App(): ReactElement {
       setSkillHookBusy(false);
     }
   }, [skillsOpen, loadSkills, t]);
+
+  const toggleSessionSyncHook = useCallback(async (enabled: boolean) => {
+    setSessionHookBusy(true);
+    setSettingsFeedback({
+      kind: "running",
+      message: enabled ? t("Installing session sync hooks...", "正在安装会话同步 Hook...") : t("Removing session sync hooks...", "正在移除会话同步 Hook..."),
+    });
+    try {
+      const status = enabled
+        ? await window.sessionSearch.installSessionSyncHooks()
+        : await window.sessionSearch.uninstallSessionSyncHooks();
+      setSessionHookStatus(status);
+      const message = enabled
+        ? t("Session sync hooks installed.", "会话同步 Hook 已安装。")
+        : t("Session sync hooks removed.", "会话同步 Hook 已移除。");
+      setSettingsFeedback({ kind: "success", message });
+      window.setTimeout(() => setSettingsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current)), 1800);
+    } catch (error) {
+      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setSessionHookBusy(false);
+    }
+  }, [t]);
 
   useEffect(() => {
     void refreshLiveSessions();
@@ -1664,6 +1691,9 @@ export function App(): ReactElement {
     try {
       const nextSettings = await window.sessionSearch.setSettings(next);
       setAppSettings(nextSettings);
+      if ("remoteSyncEnabled" in next) {
+        setSessionHookStatus(await window.sessionSearch.getSessionSyncHookStatus());
+      }
       if (quotaVisibilityChanged) void loadQuotas();
 
       if (newlyEnabledSources.length > 0) {
@@ -2488,6 +2518,9 @@ export function App(): ReactElement {
           skillHookInstalled={skillHookInstalled}
           skillHookBusy={skillHookBusy}
           onSkillHookChange={(enabled) => void toggleSkillUsageHook(enabled)}
+          sessionHookStatus={sessionHookStatus}
+          sessionHookBusy={sessionHookBusy}
+          onSessionHookChange={(enabled) => void toggleSessionSyncHook(enabled)}
           onRefreshEnvironment={(environment) => void refreshEnvironment(environment)}
           onDiagnoseEnvironment={(environment) => void diagnoseEnvironment(environment)}
           onDeleteEnvironment={(environment) => void deleteEnvironment(environment)}
@@ -3040,6 +3073,9 @@ function SettingsDialog({
   skillHookInstalled,
   skillHookBusy,
   onSkillHookChange,
+  sessionHookStatus,
+  sessionHookBusy,
+  onSessionHookChange,
   onRefreshEnvironment,
   onDiagnoseEnvironment,
   onDeleteEnvironment,
@@ -3070,6 +3106,9 @@ function SettingsDialog({
   skillHookInstalled: boolean | null;
   skillHookBusy: boolean;
   onSkillHookChange: (enabled: boolean) => void;
+  sessionHookStatus: SessionSyncHookStatus | null;
+  sessionHookBusy: boolean;
+  onSessionHookChange: (enabled: boolean) => void;
   onRefreshEnvironment: (environment: SessionEnvironment) => void;
   onDiagnoseEnvironment: (environment: SessionEnvironment) => void;
   onDeleteEnvironment: (environment: SessionEnvironment) => void;
@@ -3135,6 +3174,19 @@ function SettingsDialog({
   const l = (en: string, zh: string) => localize(language, en, zh);
   const shouldSignalAppUpdate = Boolean(appUpdateStatus?.updateAvailable && !appUpdateStatus.updateSkipped && !appUpdateStatus.promptSnoozed);
   const appUpdateSuppressed = Boolean(appUpdateStatus?.updateAvailable && !shouldSignalAppUpdate);
+  const sessionHookSummary = sessionHookStatus === null
+    ? l("Checking Hook status...", "正在检查 Hook 状态...")
+    : sessionHookStatus.installed
+      ? l(
+          `Claude Code and Codex Hooks installed${sessionHookStatus.pending > 0 ? ` · ${sessionHookStatus.pending} pending` : ""}. Codex requires one-time trust from /hooks.`,
+          `Claude Code 与 Codex Hook 已安装${sessionHookStatus.pending > 0 ? ` · ${sessionHookStatus.pending} 个待同步` : ""}。Codex 首次使用需在 /hooks 中确认信任。`,
+        )
+      : sessionHookStatus.claude || sessionHookStatus.codex
+        ? l(
+            `Partially installed: Claude ${sessionHookStatus.claude ? "on" : "off"}, Codex ${sessionHookStatus.codex ? "on" : "off"}.`,
+            `Hook 仅部分安装：Claude ${sessionHookStatus.claude ? "已安装" : "未安装"}，Codex ${sessionHookStatus.codex ? "已安装" : "未安装"}。`,
+          )
+        : l("Not installed. Manual upload and restore remain available.", "尚未安装；仍可继续手动上传和恢复。");
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
   const settingsContentRef = useRef<HTMLDivElement>(null);
 
@@ -3644,54 +3696,20 @@ function SettingsDialog({
                       )}
                     </p>
                   </div>
-                  <button type="button" className="settings-action-button" onClick={onOpenRemoteSessions}>
-                    {l("Remote Sessions", "远程会话")}
-                  </button>
+                  {settings?.remoteSyncEnabled ? (
+                    <button type="button" className="settings-action-button" onClick={onOpenRemoteSessions}>
+                      {l("Session sync", "会话同步")}
+                    </button>
+                  ) : null}
                 </header>
-                <label className="settings-field remote-sync-field">
-                  <div className="settings-field-text">
-                    <span className="settings-field-title">Supabase URL</span>
-                    <span className="settings-field-sub">https://your-project.supabase.co</span>
-                  </div>
-                  <input
-                    type="text"
-                    value={settings?.remoteSyncSupabaseUrl ?? ""}
-                    disabled={!settings || saving}
-                    placeholder="https://your-project.supabase.co"
-                    onChange={(event) => onSettingsChange({ remoteSyncSupabaseUrl: event.currentTarget.value })}
-                  />
-                </label>
-                <label className="settings-field remote-sync-field">
-                  <div className="settings-field-text">
-                    <span className="settings-field-title">anon key</span>
-                    <span className="settings-field-sub">
-                      {l("Stored locally. Do not commit this value to the repository.", "保存在本地，请不要提交到仓库。")}
-                    </span>
-                  </div>
-                  <input
-                    type="password"
-                    value={settings?.remoteSyncSupabaseAnonKey ?? ""}
-                    disabled={!settings || saving}
-                    placeholder="eyJhbGciOi..."
-                    onChange={(event) => onSettingsChange({ remoteSyncSupabaseAnonKey: event.currentTarget.value })}
-                  />
-                </label>
-                <SupabaseSetupGuide
-                  language={language}
-                  tone="info"
-                  title={l("First-time setup", "首次配置")}
-                  message={l(
-                    "Copy the latest setup SQL, open this project's SQL Editor, run it once, then enable session sync.",
-                    "复制最新初始化 SQL，打开当前项目的 SQL Editor 执行一次，然后启用会话同步。",
-                  )}
-                  onCopySql={() => window.sessionSearch.copyCombinedSyncSetupSql()}
-                  onOpenSqlEditor={() => window.sessionSearch.openSupabaseSqlEditor("sessions")}
-                />
-                <label className="settings-field settings-toggle">
+                <label className="settings-field settings-toggle remote-sync-master-toggle">
                   <div className="settings-field-text">
                     <span className="settings-field-title">{l("Enable remote session sync", "启用远程会话同步")}</span>
                     <span className="settings-field-sub">
-                      {l("Manual upload and restore in this version. Automatic background sync comes later.", "当前版本为手动上传和恢复；后台自动同步后续再做。")}
+                      {l(
+                        "Upload and restore sessions with your Supabase project. Turning this off removes the session Hooks but keeps saved connection details and cloud data.",
+                        "使用你的 Supabase 项目上传和恢复会话。关闭后会移除会话 Hook，但保留连接信息和云端数据。",
+                      )}
                     </span>
                   </div>
                   <input
@@ -3702,6 +3720,67 @@ function SettingsDialog({
                     onChange={(event) => onSettingsChange({ remoteSyncEnabled: event.currentTarget.checked })}
                   />
                 </label>
+                {settings?.remoteSyncEnabled ? (
+                  <div className="remote-sync-settings-body">
+                    <label className="settings-field remote-sync-field">
+                      <div className="settings-field-text">
+                        <span className="settings-field-title">Supabase URL</span>
+                        <span className="settings-field-sub">https://your-project.supabase.co</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={settings.remoteSyncSupabaseUrl}
+                        disabled={saving}
+                        placeholder="https://your-project.supabase.co"
+                        onChange={(event) => onSettingsChange({ remoteSyncSupabaseUrl: event.currentTarget.value })}
+                      />
+                    </label>
+                    <label className="settings-field remote-sync-field">
+                      <div className="settings-field-text">
+                        <span className="settings-field-title">anon key</span>
+                        <span className="settings-field-sub">{l("Stored locally. Do not commit this value to the repository.", "保存在本地，请不要提交到仓库。")}</span>
+                      </div>
+                      <input
+                        type="password"
+                        value={settings.remoteSyncSupabaseAnonKey}
+                        disabled={saving}
+                        placeholder="eyJhbGciOi..."
+                        onChange={(event) => onSettingsChange({ remoteSyncSupabaseAnonKey: event.currentTarget.value })}
+                      />
+                    </label>
+                    <SupabaseSetupGuide
+                      language={language}
+                      tone="info"
+                      title={l("First-time setup", "首次配置")}
+                      message={l(
+                        "Copy the latest setup SQL, open this project's SQL Editor, and run it once before syncing.",
+                        "复制最新初始化 SQL，在当前项目的 SQL Editor 中执行一次，然后即可同步。",
+                      )}
+                      onCopySql={() => window.sessionSearch.copyCombinedSyncSetupSql()}
+                      onOpenSqlEditor={() => window.sessionSearch.openSupabaseSqlEditor("sessions")}
+                    />
+                    <div className="settings-field session-sync-hook-field">
+                      <div className="settings-field-text">
+                        <span className="settings-field-title">{l("Automatic session sync", "会话自动同步")}</span>
+                        <span className={`settings-field-sub${sessionHookStatus?.lastError ? " error" : ""}`}>
+                          {sessionHookStatus?.lastError ?? sessionHookSummary}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className={`settings-action-button${sessionHookStatus?.installed ? " danger" : ""}`}
+                        disabled={sessionHookBusy || saving || !settings.remoteSyncSupabaseUrl || !settings.remoteSyncSupabaseAnonKey}
+                        onClick={() => onSessionHookChange(!sessionHookStatus?.installed)}
+                      >
+                        {sessionHookBusy
+                          ? l("Working...", "处理中...")
+                          : sessionHookStatus?.installed
+                            ? l("Remove Hook", "移除 Hook")
+                            : l("Install Hook", "安装 Hook")}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </section>
             ) : null}
             {activeSection === "skills" ? (
