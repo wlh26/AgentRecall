@@ -166,7 +166,7 @@ CodeBuddy CLI、CodeWiz、TClaude、TCodex、Claude Code Internal、Codex Intern
 - `tag_session` — 给会话增删标签（幂等）。
 - `toggle_favorite` — 收藏 / 取消收藏会话。
 - `set_visibility` — 设置会话可见性维度（`default` / `favorites` / `hidden` / `pinned`）。
-- `migrate_session` — 把一个**本地**会话（`environmentKind=local`）迁移到目标 Agent（`claude` / `codex` / `codebuddy`）。写入目标会话文件、立即索引入库、记录 `session_migrations` 历史，并返回可执行的 `resumeCommand`。**该工具不会自动打开终端**（返回结果里 `launched` 恒为 `false`），需要你自行运行返回的 `resumeCommand`。
+- `migrate_session` — 把一个**本地**会话（`environmentKind=local`）迁移到目标 Agent（`claude` / `codex` / `codebuddy` / `codewiz` / `cursor`，以及已启用的扩展目标）。写入目标会话文件、立即索引入库、记录 `session_migrations` 历史，并返回可执行的 `resumeCommand`。**该工具不会自动打开终端**（返回结果里 `launched` 恒为 `false`），需要你自行运行返回的 `resumeCommand`。
 
   长会话会自动压缩：优先用 Settings 里配置的自定义摘要 API（`summarySource=custom`），否则回退到 `codex exec --ephemeral` / `claude --print`；压缩 provider 不可用时稳定回退到 `locally-truncated`。压缩过程中产生的临时 summary 会话会即时从数据库清除，不会残留脏数据。
 

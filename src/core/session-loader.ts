@@ -1448,10 +1448,10 @@ function loadHermesSessionRow(db: import("node:sqlite").DatabaseSync, dbPath: st
   };
 }
 
-function resolveOpenCodeDbPath(root: string): string {
+function resolveOpenCodeDbPath(root: string, shareDir = "opencode"): string {
   const direct = path.join(root, "opencode.db");
   if (fs.existsSync(direct)) return direct;
-  return path.join(root, ".local", "share", "opencode", "opencode.db");
+  return path.join(root, ".local", "share", shareDir, "opencode.db");
 }
 
 export function loadOpenCodeSessions(opencodeRoot = path.join(os.homedir(), ".local", "share", "opencode")): LoadedSession[] {
@@ -1474,7 +1474,7 @@ function loadOpenCodeLikeSessions(
   opencodeRoot: string,
   sourceOptions: { keyPrefix: "opencode" | "codewiz"; source: "opencode-cli" | "codewiz-cli"; traceSource: "opencode" | "codewiz" },
 ): LoadedSession[] {
-  const dbPath = resolveOpenCodeDbPath(opencodeRoot);
+  const dbPath = resolveOpenCodeDbPath(opencodeRoot, sourceOptions.keyPrefix);
   const db = readOnlyDatabase(dbPath);
   if (!db) return [];
   try {
@@ -1494,8 +1494,8 @@ function opencodeMessagesFromParts(
   db: import("node:sqlite").DatabaseSync,
   rawId: string,
   traceSource: "opencode" | "codewiz" = "opencode",
-): { messages: SessionMessage[]; traceEvents: SessionTraceEvent[] } {
-  if (!sqliteTableExists(db, "message")) return { messages: [], traceEvents: [] };
+): { messages: SessionMessage[]; traceEvents: SessionTraceEvent[]; tokenEvents: TokenUsageEvent[] } {
+  if (!sqliteTableExists(db, "message")) return { messages: [], traceEvents: [], tokenEvents: [] };
   const messageColumns = sqliteColumns(db, "message");
   const partColumns = sqliteColumns(db, "part");
   const hasPart = sqliteTableExists(db, "part") && partColumns.has("data");
@@ -1526,12 +1526,19 @@ function opencodeMessagesFromParts(
 
   const messages: SessionMessage[] = [];
   const traceDrafts: TraceEventDraft[] = [];
+  const tokenEntries = new Map<string, TokenUsageEvent>();
   for (const row of rows) {
     const messageData = parseJsonText(unknownField(row, "message_data"));
     const partData = parseJsonText(unknownField(row, "part_data"));
+    const ts = timestampString(unknownField(row, "part_time_created") || unknownField(row, "time_created"));
+    const tokenSource = tokenDataFromOpenCodeRecord(partData) || tokenDataFromOpenCodeRecord(messageData);
+    if (tokenSource) {
+      const rawKey = stringField(row, "id") || stringField(row, "part_id") || `${rawId}:${tokenEntries.size}`;
+      const key = `${traceSource}:${rawKey}`;
+      putTokenEvent(tokenEntries, tokenEvent(timestampMs(unknownField(row, "part_time_created") || unknownField(row, "time_created")), key, tokenSource.input, tokenSource.output, tokenSource.cached, tokenSource.reasoning));
+    }
     const role = (isRecord(messageData) && roleFromValue(messageData)) || roleFromValue(row);
     const content = extractText(partData) || (isRecord(messageData) ? extractText(messageData) : "");
-    const ts = timestampString(unknownField(row, "part_time_created") || unknownField(row, "time_created"));
     if (role && content && isMeaningfulUserMessage(content)) {
       messages.push(messageFromParts(role, content, ts, messages.length));
       continue;
@@ -1550,7 +1557,20 @@ function opencodeMessagesFromParts(
       });
     }
   }
-  return { messages, traceEvents: dedupeTraceEvents(traceDrafts) };
+  return { messages, traceEvents: dedupeTraceEvents(traceDrafts), tokenEvents: Array.from(tokenEntries.values()) };
+}
+
+function tokenDataFromOpenCodeRecord(value: unknown): { input: number; output: number; cached: number; reasoning: number } | null {
+  if (!isRecord(value)) return null;
+  const tokens = unknownField(value, "tokens");
+  if (!isRecord(tokens)) return null;
+  const cache = unknownField(tokens, "cache");
+  const cached = isRecord(cache) ? numberField(cache, "read") + numberField(cache, "write") : numberField(tokens, "cached") + numberField(tokens, "cache_read") + numberField(tokens, "cache_write");
+  const input = numberField(tokens, "input");
+  const output = numberField(tokens, "output");
+  const reasoning = numberField(tokens, "reasoning");
+  if (input <= 0 && output <= 0 && cached <= 0 && reasoning <= 0) return null;
+  return { input, output, cached, reasoning };
 }
 
 function loadOpenCodeSessionRow(
@@ -1565,15 +1585,17 @@ function loadOpenCodeSessionRow(
 ): LoadedSession | null {
   const rawId = stringField(session, "id");
   if (!rawId) return null;
-  const { messages, traceEvents } = opencodeMessagesFromParts(db, rawId, sourceOptions.traceSource);
+  const { messages, traceEvents, tokenEvents } = opencodeMessagesFromParts(db, rawId, sourceOptions.traceSource);
   const question = firstQuestion(messages);
   const stat = safeStat(dbPath);
-  const usage = createSourceTokenUsage(
-    numberField(session, "tokens_input"),
-    numberField(session, "tokens_output"),
-    numberField(session, "tokens_cache_read") + numberField(session, "tokens_cache_write"),
-    numberField(session, "tokens_reasoning"),
-  );
+  const usage = tokenEvents.length
+    ? tokenUsageFromEvents(tokenEvents)
+    : createSourceTokenUsage(
+        numberField(session, "tokens_input"),
+        numberField(session, "tokens_output"),
+        numberField(session, "tokens_cache_read") + numberField(session, "tokens_cache_write"),
+        numberField(session, "tokens_reasoning"),
+      );
   return {
     session: createIndexedSession({
       keyPrefix: sourceOptions.keyPrefix,
@@ -1588,6 +1610,7 @@ function loadOpenCodeSessionRow(
       stat,
     }),
     messages,
+    tokenEvents,
     traceEvents,
   };
 }

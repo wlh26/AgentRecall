@@ -309,7 +309,7 @@ describe("migrateSession", () => {
     expect(result.target).toBe("codex-internal");
     expect(inspectCli).toHaveBeenCalledWith("codex-internal");
     expect(write).toHaveBeenCalledWith("codex-internal", expect.objectContaining({ sourceAgent: "claude" }));
-    expect(refreshIndex).toHaveBeenCalledWith("codex-internal", "/tmp/target-session-1.jsonl");
+    expect(refreshIndex).toHaveBeenCalledWith("codex-internal", "/tmp/target-session-1.jsonl", "target-session-1");
     expect(launch).toHaveBeenCalledWith("codex-internal", "target-session-1", "/repo");
     expect(seenRecords).toEqual([
       expect.objectContaining({ sourceAgent: "claude", targetAgent: "codex-internal" }),
@@ -350,7 +350,7 @@ describe("migrateSession", () => {
       launched: true,
     });
     expect(write).toHaveBeenCalledOnce();
-    expect(refreshIndex).toHaveBeenCalledWith(target, "/tmp/target-session-1.jsonl");
+    expect(refreshIndex).toHaveBeenCalledWith(target, "/tmp/target-session-1.jsonl", "target-session-1");
     expect(launch).toHaveBeenCalledOnce();
     expect(seenRecords).toEqual([
       {

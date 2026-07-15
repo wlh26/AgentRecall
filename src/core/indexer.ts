@@ -164,8 +164,9 @@ export function indexMigratedSessionFile(
   store: SessionStore,
   target: MigrationTarget,
   filePath: string,
+  sessionId?: string,
 ): IndexStatus {
-  const loaded = loadMigratedSessionFile(target, filePath);
+  const loaded = loadMigratedSessionFile(target, filePath, sessionId);
   if (!loaded) {
     throw new Error(`Migrated ${target} session could not be loaded from ${filePath}.`);
   }
@@ -180,12 +181,15 @@ export function indexMigratedSessionFile(
   };
 }
 
-function loadMigratedSessionFile(target: MigrationTarget, filePath: string): LoadedSession | null {
+function loadMigratedSessionFile(target: MigrationTarget, filePath: string, sessionId?: string): LoadedSession | null {
   if (target === "cursor") return loadCursorTranscriptFile(filePath);
 
   const descriptor = migrationTargetDescriptor(target);
   if (descriptor.family === "codebuddy") return loadCodeBuddyCliSessionFile(filePath);
-  if (descriptor.family === "codewiz") return loadCodeWizSessions(path.dirname(filePath))[0] ?? null;
+  if (descriptor.family === "codewiz") {
+    const sessions = loadCodeWizSessions(path.dirname(filePath));
+    return sessions.find((item) => item.session.rawId === sessionId) ?? sessions[0] ?? null;
+  }
 
   let rows: unknown[];
   try {

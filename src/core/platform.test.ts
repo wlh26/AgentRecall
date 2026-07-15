@@ -90,6 +90,33 @@ describe("platform application resolution", () => {
     expect(mergeAppSettings(defaultSettings, olderSettings).autoCheckUpdates).toBe(true);
   });
 
+  it("starts fresh installs with only Claude Code and Codex sources enabled", () => {
+    expect(defaultSettings.includeClaudeInternal).toBe(false);
+    expect(defaultSettings.includeCodexInternal).toBe(false);
+    expect(defaultSettings.includeTclaude).toBe(false);
+    expect(defaultSettings.includeTcodex).toBe(false);
+    expect(defaultSettings.includeCodeBuddyCli).toBe(false);
+    expect(defaultSettings.includeCodeWizCli).toBe(false);
+    expect(defaultSettings.includeOpenClaw).toBe(false);
+    expect(defaultSettings.includeHermes).toBe(false);
+    expect(defaultSettings.includeOpenCode).toBe(false);
+    expect(defaultSettings.includeCursorAgent).toBe(false);
+    expect(defaultSettings.includeTrae).toBe(false);
+  });
+
+  it("preserves persisted personalization flags across app restarts and updates", () => {
+    const persisted = {
+      includeCodeWizCli: true,
+      includeCodeBuddyCli: true,
+      includeTrae: true,
+      hideSubagentSessions: false,
+      autoCheckUpdates: false,
+      defaultTerminal: "iTerm" as const,
+    };
+
+    expect(mergeAppSettings(defaultSettings, persisted)).toMatchObject(persisted);
+  });
+
   it("returns the first macOS application name that resolves", async () => {
     const calls: string[][] = [];
     const runner = async (_command: string, args: string[]) => {

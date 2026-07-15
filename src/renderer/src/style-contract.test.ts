@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const stylesheet = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 
 describe("stylesheet theme contract", () => {
   it("keeps structured search hits compact and highlighted with theme tokens", () => {
@@ -28,6 +29,16 @@ describe("stylesheet theme contract", () => {
     expect(stylesheet).not.toMatch(/:root\[data-theme="(?:light|dark)"\]\s+[^,{]*\.[\w-]/);
     expect(stylesheet).not.toContain("LIGHT WORKBENCH");
     expect(stylesheet).not.toContain("DARK WORKBENCH");
+  });
+
+  it("opens session rows on single click without selecting row text", () => {
+    const rowRender = appSource.slice(appSource.indexOf("<article"), appSource.indexOf('<div className="session-main">'));
+    const sessionRow = stylesheet.match(/\.session-row\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(rowRender).toContain("onOpen(session);");
+    expect(rowRender).not.toContain("onDoubleClick={() => onOpen(session)}");
+    expect(sessionRow).toMatch(/user-select:\s*none/);
+    expect(sessionRow).toMatch(/-webkit-user-select:\s*none/);
   });
 
   it("reserves a stable scrollbar gutter on scrollers whose overflow is frozen by the overlay", () => {
@@ -145,15 +156,25 @@ describe("stylesheet theme contract", () => {
     expect(scopeFilter).toMatch(/flex:\s*0\s+1\s+auto/);
     expect(scopeFilter).toMatch(/position:\s*relative/);
     expect(singleScopeFilter).toMatch(/--scope-filter-max:\s*160px/);
-    expect(scopeFilterChip).toMatch(/flex:\s*0\s+1\s+auto/);
+    expect(scopeFilterChip).toMatch(/position:\s*relative/);
+    expect(scopeFilterChip).toMatch(/justify-content:\s*space-between/);
+    expect(scopeFilterChip).toMatch(/flex:\s*1\s+1\s+0/);
     expect(scopeFilterChip).toMatch(/max-width:\s*100%/);
     expect(scopeFilterChip).toMatch(/min-width:\s*0/);
-    expect(scopeFilterChip).toMatch(/overflow:\s*hidden/);
+    expect(scopeFilterChip).toMatch(/overflow:\s*visible/);
     expect(scopeFilterLabelText).toMatch(/text-overflow:\s*ellipsis/);
     expect(scopeFilterLabelText).toMatch(/white-space:\s*nowrap/);
     expect(scopeTooltip).toMatch(/box-shadow:\s*var\(--shadow-popover\)/);
     expect(scopeTooltip).toMatch(/background:\s*var\(--panel-bg\)/);
     expect(scopeTooltip).toMatch(/pointer-events:\s*none/);
+    expect(scopeTooltip).toMatch(/width:\s*max-content/);
+    expect(scopeTooltip).toMatch(/max-width:\s*min\(720px,\s*calc\(100vw - 48px\)\)/);
+    expect(scopeTooltip).toMatch(/overflow-wrap:\s*break-word/);
+    expect(scopeTooltip).not.toMatch(/overflow-wrap:\s*anywhere/);
+    const scopeFilterRender = appSource.slice(appSource.indexOf('className="scope-filter"'), appSource.indexOf('className="live-filter"'));
+    expect(scopeFilterRender).not.toContain("onFocus={() => setHoveredScopeFilter");
+    expect(scopeFilterRender).toContain('{hoveredScopeFilter === filter.key ? (');
+    expect(scopeFilterRender.indexOf('className="scope-filter-tooltip"')).toBeGreaterThan(scopeFilterRender.indexOf('className="scope-filter-chip"'));
     expect(dateFilter).toMatch(/height:\s*38px/);
     expect(dateFilter).toMatch(/width:\s*fit-content/);
     expect(dateFilter).toMatch(/max-width:\s*var\(--date-filter-width\)/);

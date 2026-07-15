@@ -52,7 +52,7 @@ describe("restoreRemotePortableSession", () => {
       sourceAgent: "codex",
       targetAgent: "claude",
     }));
-    expect(refreshIndex).toHaveBeenCalledWith("claude", "/target/session.jsonl");
+    expect(refreshIndex).toHaveBeenCalledWith("claude", "/target/session.jsonl", "target-session");
     expect(launch).toHaveBeenCalledWith("claude", "target-session", "/device-b/repo");
     expect(result).toMatchObject({
       target: "claude",

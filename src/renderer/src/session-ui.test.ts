@@ -9,6 +9,7 @@ import {
   sourceFilterLabel,
   sourceFilters,
   usageStatsDisplayRows,
+  hasTokenUsage,
 } from "./session-ui";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
@@ -34,6 +35,10 @@ describe("session source labels", () => {
     expect(labels).toEqual(expect.arrayContaining(["All", "Claude Code", "Codex"]));
     expect(zhLabels).toEqual(expect.arrayContaining(["全部", "Claude Code", "Codex"]));
     expect(labels).not.toEqual(expect.arrayContaining(["Claude", "Claude App", "Codex CLI", "Codex App"]));
+  });
+
+  it("shows only Claude Code and Codex source filters on a fresh install", () => {
+    expect(sourceFilters(defaultSettings).map((filter) => filter.label)).toEqual(["All", "Claude Code", "Codex"]);
   });
 
   it("shows optional local agent sources only after they are enabled in settings", () => {
@@ -123,6 +128,13 @@ describe("session source labels", () => {
         totalTokens: 4,
       },
     ]);
+  });
+
+  it("treats zero-token sources as unknown usage instead of displayable usage", () => {
+    expect(hasTokenUsage({ totalTokens: 0 })).toBe(false);
+    expect(hasTokenUsage({ totalTokens: 1 })).toBe(true);
+    expect(appSource).toContain("hasTokenUsage(stats.total)");
+    expect(appSource).toContain("hasTokenUsage(session.tokenUsage)");
   });
 
   it("derives migration targets from enabled settings in registry order", () => {

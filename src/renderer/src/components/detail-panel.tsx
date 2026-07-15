@@ -4,6 +4,7 @@ import { ArrowRightLeft, ChevronDown, ChevronUp, CloudUpload, Copy, Download, Ed
 import { formatMessageTime } from "../../../core/format-session";
 import type { SessionMessage, SessionSearchResult, SessionTraceEvent } from "../../../core/types";
 import { formatTokenCount } from "../format-count";
+import { hasTokenUsage } from "../session-ui";
 import { localize, type LanguageMode } from "../language";
 import type { LiveSessionState } from "../live-filter";
 import type { ActionStatus } from "../app-types";
@@ -179,6 +180,13 @@ export function DetailPanel({
   const context = matchedContextMessages;
   const actionRunning = actionStatus?.kind === "running";
   const l = (en: string, zh: string) => localize(language, en, zh);
+  const detailMeta = [
+    session.projectPath || l("No project", "无项目"),
+    new Date(session.timestamp).toLocaleString(),
+    l(`${session.messageCount} messages`, `${session.messageCount} 条消息`),
+    ...(hasTokenUsage(session.tokenUsage) ? [l(`${formatTokenCount(session.tokenUsage.totalTokens)} tokens`, `${formatTokenCount(session.tokenUsage.totalTokens)} token`)] : []),
+    ...(traceEvents.length > 0 ? [l(`${traceEvents.length} trace events`, `${traceEvents.length} 条轨迹`)] : []),
+  ];
   const bodyRef = useRef<HTMLDivElement>(null);
   const pendingInitialScrollRef = useRef<string | null>(session.sessionKey);
   const [roleFilter, setRoleFilter] = useState<ConversationRoleFilter>("all");
@@ -374,11 +382,7 @@ export function DetailPanel({
                 </button>
               ) : null}
             </div>
-            <p>
-              {session.projectPath || l("No project", "无项目")} · {new Date(session.timestamp).toLocaleString()} · {l(`${session.messageCount} messages`, `${session.messageCount} 条消息`)} ·{" "}
-              {l(`${formatTokenCount(session.tokenUsage.totalTokens)} tokens`, `${formatTokenCount(session.tokenUsage.totalTokens)} token`)}
-              {traceEvents.length > 0 ? <> · {l(`${traceEvents.length} trace events`, `${traceEvents.length} 条轨迹`)}</> : null}
-            </p>
+            <p>{detailMeta.join(" · ")}</p>
           </div>
           <div className="detail-header-actions">
             {!readOnly ? (

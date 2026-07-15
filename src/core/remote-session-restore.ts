@@ -17,7 +17,7 @@ export interface RemoteSessionRestoreDependencies {
   ) => Promise<PreparedMigrationSession>;
   write: (target: MigrationAgent, session: PortableSession) => Promise<WrittenMigratedSession>;
   record: (record: SessionMigrationRecord) => Promise<void> | void;
-  refreshIndex: (target: MigrationAgent, targetFilePath: string) => Promise<void>;
+  refreshIndex: (target: MigrationAgent, targetFilePath: string, targetSessionId: string) => Promise<void>;
   launch: (target: MigrationAgent, sessionId: string, projectPath: string) => Promise<void>;
   resumeCommand: (target: MigrationAgent, sessionId: string, projectPath: string) => string;
   fallbackResumeCommand: (target: MigrationAgent, sessionId: string, projectPath: string) => string;
@@ -116,7 +116,7 @@ export async function restoreRemotePortableSession({
   });
   let indexed = true;
   try {
-    await deps.refreshIndex(target, written.filePath);
+    await deps.refreshIndex(target, written.filePath, written.sessionId);
   } catch (error) {
     indexed = false;
     warnings.push(formatWarning("Failed to refresh session index", error));

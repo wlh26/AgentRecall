@@ -1627,15 +1627,17 @@ select:focus-visible {
 }
 
 .scope-filter-chip {
+  position: relative;
   display: inline-flex;
   align-items: center;
+  justify-content: space-between;
   min-width: 0;
   max-width: 100%;
   height: 30px;
-  flex: 0 1 auto;
+  flex: 1 1 0;
   gap: 4px;
   padding: 0 7px;
-  overflow: hidden;
+  overflow: visible;
   border-radius: 999px;
   color: var(--accent);
   font-family: var(--mono);
@@ -1683,9 +1685,12 @@ select:focus-visible {
   top: calc(100% + 7px);
   left: 50%;
   z-index: 40;
-  max-width: min(520px, 48vw);
+  width: max-content;
+  min-width: min(280px, calc(100vw - 48px));
+  max-width: min(720px, calc(100vw - 48px));
   padding: 8px 10px;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
   border: 1px solid var(--border);
   border-radius: 9px;
   background: var(--panel-bg);
@@ -1830,6 +1835,8 @@ select:focus-visible {
   border-bottom: 1px solid var(--border-subtle);
   background: var(--row-bg);
   cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
   transition: background 0.12s ease;
 }
 

@@ -72,6 +72,10 @@ export function usageStatsDisplayRows(rows: SessionSourceStats[]): UsageStatsDis
   return [...grouped.values()];
 }
 
+export function hasTokenUsage(value: Pick<SessionStatsSummary, "totalTokens">): boolean {
+  return value.totalTokens > 0;
+}
+
 const BASE_SOURCE_FILTERS: Array<{ label: string; value: SearchOptions["source"] }> = [
   { label: "All", value: "all" },
   { label: "Claude Code", value: "claude" },

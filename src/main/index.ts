@@ -425,8 +425,8 @@ async function restoreRemoteSession(
       prepare: (session, onProgress) => applyMigrationLengthPolicy(session, compressor, onProgress),
       write: (migrationTarget, session) => writeMigratedSession({ target: migrationTarget, session }),
       record: (record) => store.recordSessionMigration(record),
-      refreshIndex: async (migrationTarget, writtenFilePath) => {
-        const status = indexMigratedSessionFile(store, migrationTarget, writtenFilePath);
+      refreshIndex: async (migrationTarget, writtenFilePath, targetSessionId) => {
+        const status = indexMigratedSessionFile(store, migrationTarget, writtenFilePath, targetSessionId);
         indexStatus = status;
         mainWindow?.webContents.send("index-status", indexStatus);
       },
@@ -1440,8 +1440,8 @@ function localSessionMigrationRuntime(event: IpcMainInvokeEvent) {
     write: (migrationTarget: MigrationTarget, portable: PortableSession) =>
       writeMigratedSession({ target: migrationTarget, session: portable }),
     record: (record: Parameters<SessionStore["recordSessionMigration"]>[0]) => store.recordSessionMigration(record),
-    refreshIndex: async (migrationTarget: MigrationTarget, writtenFilePath: string) => {
-      const status = indexMigratedSessionFile(store, migrationTarget, writtenFilePath);
+    refreshIndex: async (migrationTarget: MigrationTarget, writtenFilePath: string, targetSessionId: string) => {
+      const status = indexMigratedSessionFile(store, migrationTarget, writtenFilePath, targetSessionId);
       indexStatus = status;
       mainWindow?.webContents.send("index-status", indexStatus);
     },

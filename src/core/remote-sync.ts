@@ -467,11 +467,11 @@ if kind == "codewiz":
     return data.get("text") if isinstance(data.get("text"), str) else ""
   def parse_codewiz_row(row):
     try:
-      message_data = json.loads(row[3] or "{}")
+      message_data = json.loads(row[2] or "{}")
     except Exception:
       message_data = {}
     try:
-      part_data = json.loads(row[6] or "{}")
+      part_data = json.loads(row[5] or "{}")
     except Exception:
       part_data = {}
     role = message_data.get("role") if isinstance(message_data, dict) else None
@@ -480,11 +480,11 @@ if kind == "codewiz":
     content = text_from_codewiz_part(part_data)
     if not content or (role == "user" and not meaningful_user(content)):
       return None
-    return {"role": role, "content": content, "timestamp": row[5] if isinstance(row[5], (int, float)) else row[1]}
+    return {"role": role, "content": content, "timestamp": row[4] if isinstance(row[4], (int, float)) else row[1]}
   db = sqlite3.connect(str(path))
   try:
     rows = db.execute("""
-      SELECT message.id, message.time_created, message.time_updated, message.data AS message_data,
+      SELECT message.id, message.time_created, message.data AS message_data,
         part.id AS part_id, part.time_created AS part_time_created, part.data AS part_data
       FROM message
       LEFT JOIN part ON part.message_id = message.id
@@ -934,7 +934,7 @@ def text_from_codewiz_part(data):
 def codewiz_message_rows(db, session_id):
   try:
     return db.execute("""
-      SELECT message.id, message.time_created, message.time_updated, message.data AS message_data,
+      SELECT message.id, message.time_created, message.data AS message_data,
         part.id AS part_id, part.time_created AS part_time_created, part.data AS part_data
       FROM message
       LEFT JOIN part ON part.message_id = message.id
@@ -946,11 +946,11 @@ def codewiz_message_rows(db, session_id):
 
 def parse_codewiz_row(row):
   try:
-    message_data = json.loads(row[3] or "{}")
+    message_data = json.loads(row[2] or "{}")
   except Exception:
     message_data = {}
   try:
-    part_data = json.loads(row[6] or "{}")
+    part_data = json.loads(row[5] or "{}")
   except Exception:
     part_data = {}
   role = message_data.get("role") if isinstance(message_data, dict) else None
@@ -959,7 +959,41 @@ def parse_codewiz_row(row):
   content = text_from_codewiz_part(part_data)
   if not content or (role == "user" and not meaningful_user(content)):
     return None
-  return {"role": role, "content": content, "timestamp": row[5] if isinstance(row[5], (int, float)) else row[1]}
+  return {"role": role, "content": content, "timestamp": row[4] if isinstance(row[4], (int, float)) else row[1]}
+
+def codewiz_tokens_from_data(data):
+  if not isinstance(data, dict):
+    return None
+  tokens = data.get("tokens")
+  if not isinstance(tokens, dict):
+    return None
+  cache = tokens.get("cache")
+  if isinstance(cache, dict):
+    cached = _tok_num(cache.get("read")) + _tok_num(cache.get("write"))
+  else:
+    cached = _tok_num(tokens.get("cached")) + _tok_num(tokens.get("cache_read")) + _tok_num(tokens.get("cache_write"))
+  usage = _tok_create(_tok_num(tokens.get("input")), _tok_num(tokens.get("output")), cached, _tok_num(tokens.get("reasoning")))
+  return usage if usage["totalTokens"] > 0 else None
+
+def codewiz_token_events(rows, source):
+  entries = {}
+  for index, row in enumerate(rows):
+    try:
+      message_data = json.loads(row[2] or "{}")
+    except Exception:
+      message_data = {}
+    try:
+      part_data = json.loads(row[5] or "{}")
+    except Exception:
+      part_data = {}
+    usage = codewiz_tokens_from_data(part_data) or codewiz_tokens_from_data(message_data)
+    if not usage:
+      continue
+    raw_key = row[0] if isinstance(row[0], str) and row[0] else row[3] if isinstance(row[3], str) and row[3] else str(index)
+    key = "%s:%s" % (source, raw_key)
+    timestamp = row[4] if isinstance(row[4], (int, float)) else row[1]
+    _tok_put(entries, key, _tok_event(_tok_timestamp(timestamp), key, usage))
+  return list(entries.values())
 
 def codewiz_token_usage(session):
   return _tok_create(
@@ -982,7 +1016,9 @@ def emit_codewiz_summaries(db_path, stat):
       first_question = ""
       message_count = 0
       message_events = []
-      for row in codewiz_message_rows(db, raw_id):
+      rows = codewiz_message_rows(db, raw_id)
+      token_events = codewiz_token_events(rows, "codewiz")
+      for row in rows:
         parsed = parse_codewiz_row(row)
         if not parsed:
           continue
@@ -1003,8 +1039,8 @@ def emit_codewiz_summaries(db_path, stat):
         "messageCount": message_count,
         "messageEvents": message_events,
         "gitBranch": "",
-        "tokenUsage": codewiz_token_usage(session),
-        "tokenEvents": [],
+        "tokenUsage": _tok_total(token_events) if token_events else codewiz_token_usage(session),
+        "tokenEvents": token_events,
       })
   finally:
     try:

@@ -446,6 +446,33 @@ describe("remote sync", () => {
         ].join("\n"),
         "utf8",
       );
+      const codewizDir = path.join(tempHome, ".local", "share", "codewiz");
+      fs.mkdirSync(codewizDir, { recursive: true });
+      const codewizDbPath = path.join(codewizDir, "opencode.db");
+      execFileSync(
+        "python3",
+        [
+          "-c",
+          String.raw`
+import json, sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.executescript('''
+CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL, title TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER);
+CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, time_created INTEGER NOT NULL, data TEXT NOT NULL);
+CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, data TEXT NOT NULL);
+''')
+db.execute("INSERT INTO session VALUES (?, ?, ?, ?, ?)", ("remote-codewiz-token-events", "/repo/codewiz", "CodeWiz remote tokens", 1780560000000, 1780560600000))
+db.execute("INSERT INTO message VALUES (?, ?, ?, ?, ?)", ("cw-user", "remote-codewiz-token-events", "user", 1780560060000, json.dumps({"role": "user"})))
+db.execute("INSERT INTO part VALUES (?, ?, ?, ?, ?)", ("cw-user-part", "cw-user", "remote-codewiz-token-events", 1780560060000, json.dumps({"type": "text", "text": "codewiz remote question"})))
+db.execute("INSERT INTO message VALUES (?, ?, ?, ?, ?)", ("cw-assistant", "remote-codewiz-token-events", "assistant", 1780560120000, json.dumps({"role": "assistant", "tokens": {"input": 200, "output": 50, "reasoning": 7, "cache": {"read": 1000, "write": 9}}})))
+db.execute("INSERT INTO part VALUES (?, ?, ?, ?, ?)", ("cw-assistant-part", "cw-assistant", "remote-codewiz-token-events", 1780560120000, json.dumps({"type": "text", "text": "codewiz remote answer", "tokens": {"input": 200, "output": 50, "reasoning": 7, "cache": {"read": 1000, "write": 9}}})))
+db.commit()
+db.close()
+`,
+          codewizDbPath,
+        ],
+        { encoding: "utf8" },
+      );
 
       let collectorCommand = "";
       await syncRemoteEnvironment(store, environment, {
@@ -528,6 +555,29 @@ describe("remote sync", () => {
         cachedInputTokens: 37,
         reasoningOutputTokens: 3,
         totalTokens: 77,
+      });
+      const codewizSummary = output
+        .trim()
+        .split(/\r?\n/)
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .find((item) => item.rawId === "remote-codewiz-token-events");
+      expect(codewizSummary?.tokenEvents).toEqual([
+        {
+          timestamp: 1780560120000,
+          dedupeKey: "codewiz:cw-assistant",
+          inputTokens: 200,
+          outputTokens: 50,
+          cachedInputTokens: 1009,
+          reasoningOutputTokens: 7,
+          totalTokens: 1266,
+        },
+      ]);
+      expect(codewizSummary?.tokenUsage).toEqual({
+        inputTokens: 200,
+        outputTokens: 50,
+        cachedInputTokens: 1009,
+        reasoningOutputTokens: 7,
+        totalTokens: 1266,
       });
     } finally {
       store.close();

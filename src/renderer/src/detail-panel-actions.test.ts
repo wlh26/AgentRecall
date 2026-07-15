@@ -41,6 +41,12 @@ describe("detail panel actions", () => {
     expect(detailPanel).toMatch(/Export MD/);
   });
 
+  it("omits token metadata from the detail header when usage is unknown", () => {
+    expect(detailPanelSource).toContain("const detailMeta = [");
+    expect(detailPanelSource).toContain("...(hasTokenUsage(session.tokenUsage) ?");
+    expect(detailPanelSource).toContain('detailMeta.join(" · ")');
+  });
+
   it("keeps right-click resume and markdown export without standalone terminal focus or plain text copy", () => {
     const contextMenu = appSource.slice(appSource.indexOf("function ContextMenu"), appSource.indexOf("function SettingsDialog"));
 

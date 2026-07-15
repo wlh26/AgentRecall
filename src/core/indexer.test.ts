@@ -123,6 +123,7 @@ describe("indexer", () => {
     { target: "tcodex", source: "tcodex-cli" },
     { target: "codex-internal", source: "codex-internal" },
     { target: "codebuddy", source: "codebuddy-cli" },
+    { target: "codewiz", source: "codewiz-cli" },
     { target: "cursor", source: "cursor-agent" },
   ] as const satisfies readonly { target: MigrationTarget; source: SessionSource }[])(
     "indexes one migrated $target session file as its concrete source without a full scan",
@@ -137,7 +138,7 @@ describe("indexer", () => {
           session: portableSession(),
         });
 
-        const status = indexMigratedSessionFile(store, target, written.filePath);
+        const status = indexMigratedSessionFile(store, target, written.filePath, written.sessionId);
 
         expect(status).toMatchObject({ running: false, indexed: 1, total: 1, error: null });
         const indexed = store.searchSessions({ source, limit: 10 });
@@ -153,6 +154,34 @@ describe("indexer", () => {
       }
     },
   );
+
+  it("indexes the exact migrated CodeWiz session from a shared database", async () => {
+    const store = createInMemoryStore();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-session-search-index-codewiz-exact-"));
+    try {
+      await writeMigratedSession({
+        target: "codewiz",
+        homeDir,
+        now: new Date("2026-06-24T10:00:00.000Z"),
+        session: { ...portableSession(), title: "Old CodeWiz session", messages: [{ role: "user", content: "old codewiz question", timestamp: "2026-06-24T09:00:00.000Z", index: 0 }] },
+      });
+      const written = await writeMigratedSession({
+        target: "codewiz",
+        homeDir,
+        now: new Date("2026-06-24T10:01:00.000Z"),
+        session: portableSession(),
+      });
+
+      const status = indexMigratedSessionFile(store, "codewiz", written.filePath, written.sessionId);
+
+      expect(status).toMatchObject({ running: false, indexed: 1, total: 1, error: null });
+      expect(store.searchSessions({ query: "migrated question", source: "codewiz-cli", limit: 10 })).toHaveLength(1);
+      expect(store.searchSessions({ query: "old codewiz question", source: "codewiz-cli", limit: 10 })).toHaveLength(0);
+    } finally {
+      store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
 
   it.each(["claude", "codex", "codebuddy"] as const)(
     "reports a stable domain error when a migrated %s session file is missing",

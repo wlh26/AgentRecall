@@ -5,6 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
   loadCursorAgentSessions,
+  loadCodeWizSessions,
   loadHermesSessions,
   loadOpenClawSessions,
   loadOpenCodeSessions,
@@ -291,6 +292,95 @@ describe("extra session sources", () => {
       firstQuestion: "Fix OpenCode route",
     });
     expect(loaded[0].messages.map((message) => message.content)).toEqual(["Fix OpenCode route", "I will inspect router.ts"]);
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("loads CodeWiz token usage from message and part JSON", () => {
+    const root = tmpDir("codewiz-tokens");
+    const dbPath = path.join(root, "opencode.db");
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY,
+        directory TEXT NOT NULL,
+        title TEXT NOT NULL,
+        time_created INTEGER NOT NULL,
+        time_updated INTEGER
+      );
+      CREATE TABLE message (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        time_created INTEGER NOT NULL,
+        data TEXT NOT NULL
+      );
+      CREATE TABLE part (
+        id TEXT PRIMARY KEY,
+        message_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        time_created INTEGER NOT NULL,
+        data TEXT NOT NULL
+      );
+    `);
+    db.prepare("INSERT INTO session (id, directory, title, time_created, time_updated) VALUES (?, ?, ?, ?, ?)").run(
+      "codewiz-1",
+      "/work/codewiz-app",
+      "CodeWiz token fix",
+      Date.parse("2026-06-10T12:00:00Z"),
+      Date.parse("2026-06-10T12:10:00Z"),
+    );
+    db.prepare("INSERT INTO message (id, session_id, type, time_created, data) VALUES (?, ?, ?, ?, ?)").run(
+      "msg-user",
+      "codewiz-1",
+      "user",
+      Date.parse("2026-06-10T12:01:00Z"),
+      JSON.stringify({ role: "user" }),
+    );
+    db.prepare("INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)").run(
+      "part-user",
+      "msg-user",
+      "codewiz-1",
+      Date.parse("2026-06-10T12:01:00Z"),
+      JSON.stringify({ type: "text", text: "Fix CodeWiz token stats" }),
+    );
+    db.prepare("INSERT INTO message (id, session_id, type, time_created, data) VALUES (?, ?, ?, ?, ?)").run(
+      "msg-assistant",
+      "codewiz-1",
+      "assistant",
+      Date.parse("2026-06-10T12:02:00Z"),
+      JSON.stringify({ role: "assistant", tokens: { input: 242, output: 142, reasoning: 13, cache: { read: 18816, write: 4 } } }),
+    );
+    db.prepare("INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)").run(
+      "part-assistant",
+      "msg-assistant",
+      "codewiz-1",
+      Date.parse("2026-06-10T12:02:00Z"),
+      JSON.stringify({ type: "text", text: "I will inspect token rows", tokens: { input: 242, output: 142, reasoning: 13, cache: { read: 18816, write: 4 } } }),
+    );
+    db.close();
+
+    const loaded = loadCodeWizSessions(root);
+
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].session.tokenUsage).toEqual({
+      inputTokens: 242,
+      outputTokens: 142,
+      cachedInputTokens: 18820,
+      reasoningOutputTokens: 13,
+      totalTokens: 19217,
+    });
+    expect(loaded[0].tokenEvents).toEqual([
+      {
+        timestamp: Date.parse("2026-06-10T12:02:00Z"),
+        dedupeKey: "codewiz:msg-assistant",
+        inputTokens: 242,
+        outputTokens: 142,
+        cachedInputTokens: 18820,
+        reasoningOutputTokens: 13,
+        totalTokens: 19217,
+      },
+    ]);
 
     fs.rmSync(root, { recursive: true, force: true });
   });

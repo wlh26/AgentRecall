@@ -28,7 +28,7 @@ export interface SessionMigrationDependencies {
     session: PortableSession,
   ) => Promise<WrittenMigratedSession>;
   record: (record: SessionMigrationRecord) => Promise<void> | void;
-  refreshIndex: (target: MigrationTarget, targetFilePath: string) => Promise<void>;
+  refreshIndex: (target: MigrationTarget, targetFilePath: string, targetSessionId: string) => Promise<void>;
   launch: (
     target: MigrationTarget,
     sessionId: string,
@@ -227,7 +227,7 @@ export async function migrateSession({
   });
   let indexed = true;
   try {
-    await deps.refreshIndex(target, written.filePath);
+    await deps.refreshIndex(target, written.filePath, written.sessionId);
   } catch (error) {
     indexed = false;
     warnings.push(formatWarning("Failed to refresh session index", error));

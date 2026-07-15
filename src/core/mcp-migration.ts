@@ -198,7 +198,7 @@ export async function migrateSessionForMcp(
 
   let indexed = true;
   try {
-    indexMigratedSessionFile(store, target, written.filePath);
+    indexMigratedSessionFile(store, target, written.filePath, written.sessionId);
   } catch (error) {
     indexed = false;
     warnings.push(`Failed to index migrated session: ${error instanceof Error ? error.message : String(error)}`);

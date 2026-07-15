@@ -366,6 +366,7 @@ describe("MCP migrate_session tool", () => {
 
   it("uses the nine-target schema for the real migrate_session tool contract", async () => {
     const schema = await migrationTargetSchema(z);
+    expect(schema.parse("codewiz")).toBe("codewiz");
     expect(schema.parse("tclaude")).toBe("tclaude");
     expect(() => schema.parse("gemini")).toThrow();
     expect(schema.options).toEqual([

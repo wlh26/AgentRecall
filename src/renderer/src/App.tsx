@@ -124,6 +124,7 @@ import {
   SOURCE_LABEL,
   environmentBadgeLabel,
   environmentBadgeTitle,
+  hasTokenUsage,
   isBranchTag,
   displayTagName,
   isRemoteSession,
@@ -1921,17 +1922,20 @@ export function App(): ReactElement {
               <strong>{formatCompactNumber(stats.total.messageCount)}</strong>
               {t("Messages", "消息")}
             </span>
-            <span>
-              <strong>{formatTokenCount(stats.total.totalTokens)}</strong>
-              {t("Tokens", "Token")}
-            </span>
+            {hasTokenUsage(stats.total) ? (
+              <span>
+                <strong>{formatTokenCount(stats.total.totalTokens)}</strong>
+                {t("Tokens", "Token")}
+              </span>
+            ) : null}
           </div>
           <div className="stats-breakdown">
             {usageStatsDisplayRows(stats.bySource).map((item) => (
               <div key={item.key}>
                 <span>{item.label}</span>
                 <em>
-                  {formatCompactNumber(item.messageCount)} {t("msg", "条")} · {formatTokenCount(item.totalTokens)}
+                  {formatCompactNumber(item.messageCount)} {t("msg", "条")}
+                  {hasTokenUsage(item) ? ` · ${formatTokenCount(item.totalTokens)}` : ""}
                 </em>
               </div>
             ))}
@@ -2116,8 +2120,6 @@ export function App(): ReactElement {
                     onClick={filter.onClear}
                     onMouseEnter={() => setHoveredScopeFilter(filter.key)}
                     onMouseLeave={() => setHoveredScopeFilter((current) => (current === filter.key ? null : current))}
-                    onFocus={() => setHoveredScopeFilter(filter.key)}
-                    onBlur={() => setHoveredScopeFilter((current) => (current === filter.key ? null : current))}
                     aria-describedby={hoveredScopeFilter === filter.key ? "scope-filter-tooltip" : undefined}
                   >
                     <span className="scope-filter-label">
@@ -2125,13 +2127,13 @@ export function App(): ReactElement {
                       <span>{filter.label}</span>
                     </span>
                     <span className="scope-filter-clear" aria-hidden="true">×</span>
+                    {hoveredScopeFilter === filter.key ? (
+                      <span id="scope-filter-tooltip" className="scope-filter-tooltip" role="tooltip">
+                        {filter.title}
+                      </span>
+                    ) : null}
                   </button>
                 ))}
-                {hoveredScopeFilter ? (
-                  <div id="scope-filter-tooltip" className="scope-filter-tooltip" role="tooltip">
-                    {activeScopeFilters.find((filter) => filter.key === hoveredScopeFilter)?.title}
-                  </div>
-                ) : null}
               </div>
             ) : null}
             <div className="live-filter" role="group" aria-label="Live session status">
@@ -2733,8 +2735,10 @@ const SessionRow = memo(function SessionRow({
   return (
     <article
       className={`session-row ${selected ? "selected" : ""}`}
-      onClick={() => onSelect(session.sessionKey)}
-      onDoubleClick={() => onOpen(session)}
+      onClick={() => {
+        onSelect(session.sessionKey);
+        onOpen(session);
+      }}
       onContextMenu={(event) => onContextMenu(event, session)}
     >
       <div className="session-main">
@@ -2781,7 +2785,7 @@ const SessionRow = memo(function SessionRow({
           <span>{session.projectPath || l("No project path", "无项目路径")}</span>
           <span>{formatRelativeTime(sessionSortTimestamp(session))}</span>
           <span>{l(`${session.messageCount} messages`, `${session.messageCount} 条消息`)}</span>
-          <span>{l(`${formatTokenCount(session.tokenUsage.totalTokens)} tokens`, `${formatTokenCount(session.tokenUsage.totalTokens)} token`)}</span>
+          {hasTokenUsage(session.tokenUsage) ? <span>{l(`${formatTokenCount(session.tokenUsage.totalTokens)} tokens`, `${formatTokenCount(session.tokenUsage.totalTokens)} token`)}</span> : null}
         </div>
         {matchHits.length > 0 ? (
           <div className="search-match-list">

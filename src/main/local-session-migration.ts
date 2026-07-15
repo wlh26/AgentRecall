@@ -28,7 +28,7 @@ export interface LocalSessionMigrationRuntime<TEndpoint, TCompressor> {
   ) => Promise<PreparedMigrationSession>;
   write: (target: MigrationTarget, session: PortableSession) => Promise<WrittenMigratedSession>;
   record: (record: SessionMigrationRecord) => Promise<void> | void;
-  refreshIndex: (target: MigrationTarget, targetFilePath: string) => Promise<void>;
+  refreshIndex: (target: MigrationTarget, targetFilePath: string, targetSessionId: string) => Promise<void>;
   launch: (target: MigrationTarget, sessionId: string, projectPath: string, settings: AppSettings) => Promise<void>;
   resumeCommand: (target: MigrationTarget, sessionId: string, projectPath: string, settings: AppSettings) => string;
   fallbackResumeCommand: (target: MigrationTarget, sessionId: string, projectPath: string, settings: AppSettings) => string;
