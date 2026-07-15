@@ -19,11 +19,11 @@ describe("theme storage", () => {
 });
 
 describe("language storage", () => {
-  it("defaults to English and keeps explicit Chinese", () => {
-    expect(readStoredLanguage(null)).toBe("en");
+  it("defaults to Chinese and keeps an explicit language choice", () => {
+    expect(readStoredLanguage(null)).toBe("zh");
     expect(readStoredLanguage("en")).toBe("en");
     expect(readStoredLanguage("zh")).toBe("zh");
-    expect(readStoredLanguage("system")).toBe("en");
+    expect(readStoredLanguage("system")).toBe("zh");
   });
 });
 
