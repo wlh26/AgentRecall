@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createInMemoryStore } from "./session-store";
 import {
   buildRemoteSyncSshArgs,
@@ -216,6 +216,21 @@ describe("remote sync", () => {
       environmentKind: environment.kind,
       environmentLabel: environment.label,
     }, []);
+    store.setCustomTitle(legacyKey, "Legacy custom title");
+    store.setFavorited(legacyKey, true);
+    store.setPinned(legacyKey, true);
+    store.setHidden(legacyKey, true);
+    store.setAiSummary(legacyKey, "Legacy AI summary", "legacy-model");
+    store.addTag(legacyKey, "legacy-tag");
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-15T10:00:00Z"));
+      store.markOpened(legacyKey);
+      vi.setSystemTime(new Date("2026-07-15T11:00:00Z"));
+      store.markResumed(legacyKey);
+    } finally {
+      vi.useRealTimers();
+    }
     await syncRemoteEnvironment(store, environment, {
       runSsh: async () => `${JSON.stringify({
         kind,
@@ -231,7 +246,82 @@ describe("remote sync", () => {
         messageCount: 1,
       })}\n`,
     });
-    expect(store.getSession(`ssh:ssh-devbox:${source}:${rawId}`)).not.toBeNull();
+    expect(store.getSession(`ssh:ssh-devbox:${source}:${rawId}`)).toMatchObject({
+      customTitle: "Legacy custom title",
+      favorited: true,
+      pinned: true,
+      hidden: true,
+      aiSummary: "Legacy AI summary",
+      lastOpenedAt: new Date("2026-07-15T10:00:00Z").getTime(),
+      lastResumedAt: new Date("2026-07-15T11:00:00Z").getTime(),
+      tags: ["legacy-tag"],
+    });
+    expect(store.getSession(legacyKey)).toBeNull();
+    store.close();
+  });
+
+  it("keeps existing target user state while merging legacy tags", async () => {
+    const store = createInMemoryStore();
+    const environment = upsertSshEnvironment(store);
+    const rawId = "existing-target";
+    const legacyKey = `ssh:${environment.id}:codex:${rawId}`;
+    const targetKey = `ssh:${environment.id}:codex-cli:${rawId}`;
+    const seed = (sessionKey: string, title: string) => store.upsertIndexedSession({
+      sessionKey,
+      rawId,
+      source: "codex-cli",
+      projectPath: "/repo",
+      filePath: "/home/me/.codex/session.jsonl",
+      originalTitle: title,
+      firstQuestion: title,
+      timestamp: 1,
+      fileMtimeMs: 1,
+      fileSize: 1,
+      prUrl: null,
+      prNumber: null,
+      environmentId: environment.id,
+      environmentKind: environment.kind,
+      environmentLabel: environment.label,
+    }, []);
+    seed(legacyKey, "Legacy");
+    store.setCustomTitle(legacyKey, "Legacy custom");
+    store.setFavorited(legacyKey, true);
+    store.setPinned(legacyKey, true);
+    store.setHidden(legacyKey, true);
+    store.setAiSummary(legacyKey, "Legacy summary", "legacy-model");
+    store.addTag(legacyKey, "legacy-tag");
+    seed(targetKey, "Target");
+    store.setCustomTitle(targetKey, "Target custom");
+    store.setFavorited(targetKey, false);
+    store.setPinned(targetKey, false);
+    store.setHidden(targetKey, false);
+    store.setAiSummary(targetKey, "Target summary", "target-model");
+    store.addTag(targetKey, "target-tag");
+
+    await syncRemoteEnvironment(store, environment, {
+      runSsh: async () => `${JSON.stringify({
+        kind: "codex-session",
+        source: "codex-cli",
+        path: "/home/me/.codex/replacement.jsonl",
+        mtimeMs: 2,
+        size: 2,
+        rawId,
+        projectPath: "/repo",
+        timestamp: 2,
+        originalTitle: "Replacement",
+        firstQuestion: "new",
+        messageCount: 1,
+      })}\n`,
+    });
+
+    expect(store.getSession(targetKey)).toMatchObject({
+      customTitle: "Target custom",
+      favorited: false,
+      pinned: false,
+      hidden: false,
+      aiSummary: "Target summary",
+      tags: ["legacy-tag", "target-tag"],
+    });
     expect(store.getSession(legacyKey)).toBeNull();
     store.close();
   });

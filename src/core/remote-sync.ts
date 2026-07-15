@@ -305,18 +305,18 @@ export async function syncRemoteEnvironment(
     );
     for (const summary of enabledSummaries) {
       const session = remoteSummaryToIndexedSession(environment, summary);
+      migrateLegacyRemoteSessionRecord(store, session);
       store.upsertIndexedSessionSummary(
         session,
         summary.messageCount,
         summary.tokenEvents,
         summary.messageEvents,
       );
-      deleteLegacyRemoteSessionRecord(store, session);
     }
     const loaded = loadRemoteSessionPayloads(environment, payloads);
     for (const item of loaded) {
+      migrateLegacyRemoteSessionRecord(store, item.session);
       store.upsertIndexedSession(item.session, item.messages, item.tokenEvents, item.traceEvents);
-      deleteLegacyRemoteSessionRecord(store, item.session);
     }
     store.updateEnvironmentSyncState(environment.id, "watching", { lastSyncedAt: Date.now(), lastError: null });
     return { environmentId: environment.id, indexed: enabledSummaries.length + loaded.length, error: null };
@@ -327,10 +327,13 @@ export async function syncRemoteEnvironment(
   }
 }
 
-function deleteLegacyRemoteSessionRecord(store: SessionStore, session: IndexedSession): void {
+function migrateLegacyRemoteSessionRecord(store: SessionStore, session: IndexedSession): void {
   const legacyFamily = session.source === "codex-cli" ? "codex" : session.source === "claude-cli" ? "claude" : null;
   if (!legacyFamily || !session.environmentId) return;
-  store.deleteSessionRecord(`ssh:${session.environmentId}:${legacyFamily}:${session.rawId}`);
+  store.migrateSessionKeyPreservingUserState(
+    `ssh:${session.environmentId}:${legacyFamily}:${session.rawId}`,
+    session.sessionKey,
+  );
 }
 
 function remoteSummaryToIndexedSession(environment: SessionEnvironment, summary: RemoteSessionSummaryPayload): IndexedSession {
