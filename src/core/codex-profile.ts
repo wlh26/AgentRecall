@@ -23,6 +23,52 @@ export interface ApplyCodexProfileResult {
   backupPaths: string[];
 }
 
+export interface CodexConfigProviderEntry {
+  id: string;
+  name: string;
+  baseUrl: string;
+  wireApi: string;
+  envKey: string;
+  requiresOpenaiAuth: boolean;
+  hasApiKey: boolean;
+}
+
+export interface CodexConfigSnapshot {
+  codexHome: string;
+  configPath: string;
+  exists: boolean;
+  activeProviderId: string;
+  activeModel: string;
+  activeProvider: CodexConfigProviderEntry | null;
+  providers: CodexConfigProviderEntry[];
+}
+
+export interface CodexModelProbeInput {
+  baseUrl: string;
+  apiKey: string;
+  providerId?: string;
+  codexHome?: string;
+}
+
+export interface CodexModelProbeResult {
+  models: string[];
+  endpoint: string;
+}
+
+export interface CodexSummaryEndpointDefaults {
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  apiFormat: ApiConfig["customApiFormat"];
+}
+
+type FetchLike = (url: string, init?: { headers?: Record<string, string> }) => Promise<{
+  ok: boolean;
+  status: number;
+  statusText?: string;
+  json(): Promise<unknown>;
+}>;
+
 const OFFICIAL_CODEX_PROVIDER_ID = "openai";
 
 export function codexProfileForApiConfig(
@@ -54,6 +100,90 @@ export async function loadCodexProfileDefaults(codexHome = path.join(os.homedir(
   if (model) defaults.customModel = model;
   if (wireApi) defaults.customApiFormat = wireApi === "responses" ? "openai_responses" : "openai_chat";
   return defaults;
+}
+
+export async function loadCodexConfigSnapshot(codexHome = path.join(os.homedir(), ".codex")): Promise<CodexConfigSnapshot> {
+  const configPath = path.join(codexHome, "config.toml");
+  const text = await readOptionalFile(configPath);
+  const activeProviderId = readTomlString(text, "model_provider") || OFFICIAL_CODEX_PROVIDER_ID;
+  const activeModel = readTomlString(text, "model") || "";
+  const providers = readCodexModelProviders(text);
+  return {
+    codexHome,
+    configPath,
+    exists: text.trim().length > 0,
+    activeProviderId,
+    activeModel,
+    activeProvider: providers.find((provider) => provider.id === activeProviderId) ?? null,
+    providers,
+  };
+}
+
+export async function probeCodexModels(input: CodexModelProbeInput, fetchImpl: FetchLike = fetch): Promise<CodexModelProbeResult> {
+  const providerId = input.providerId || await readActiveCodexProviderId(input.codexHome);
+  const configProvider = providerId ? await readCodexConfigProviderSecret(providerId, input.codexHome) : null;
+  const baseUrl = normalizeBaseUrl(input.baseUrl || configProvider?.baseUrl || "");
+  const apiKey = input.apiKey.trim() || configProvider?.apiKey || "";
+  if (!baseUrl) throw new Error("Base URL is required to detect models.");
+  if (!apiKey) throw new Error("API key is required to detect models.");
+  const endpoint = `${baseUrl}/models`;
+  const response = await fetchImpl(endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
+  if (!response.ok) throw new Error(`Model detection failed (${response.status}${response.statusText ? ` ${response.statusText}` : ""}).`);
+  const parsed = await response.json();
+  const data = parsed && typeof parsed === "object" && Array.isArray((parsed as { data?: unknown }).data) ? (parsed as { data: unknown[] }).data : [];
+  const models = [...new Set(data.map((item) => (item && typeof item === "object" ? (item as { id?: unknown }).id : null)).filter((id): id is string => typeof id === "string" && id.trim().length > 0))].sort((a, b) => a.localeCompare(b));
+  if (models.length === 0) throw new Error("No models were returned by this API endpoint.");
+  return { endpoint, models };
+}
+
+export async function loadActiveCodexSummaryEndpointDefaults(codexHome?: string): Promise<CodexSummaryEndpointDefaults | null> {
+  const home = codexHome ?? path.join(os.homedir(), ".codex");
+  const text = await readOptionalFile(path.join(home, "config.toml"));
+  const providerId = readTomlString(text, "model_provider");
+  if (!providerId || providerId === OFFICIAL_CODEX_PROVIDER_ID) return null;
+  const section = readTomlSection(text, `[model_providers.${providerId}]`);
+  if (!section) return null;
+  const baseUrl = readTomlString(section, "base_url") || "";
+  const model = readTomlString(text, "model") || "";
+  const wireApi = readTomlString(section, "wire_api") || "";
+  const envKey = readTomlString(section, "env_key") || "";
+  const apiKey = readTomlString(section, "experimental_bearer_token") || await readCodexEnvKeySecret(envKey, text, home);
+  if (!baseUrl || !model || !apiKey) return null;
+  return {
+    baseUrl,
+    model,
+    apiKey,
+    apiFormat: wireApi === "chat" ? "openai_chat" : "openai_responses",
+  };
+}
+
+async function readActiveCodexProviderId(codexHome?: string): Promise<string> {
+  const text = await readOptionalFile(path.join(codexHome ?? path.join(os.homedir(), ".codex"), "config.toml"));
+  return readTomlString(text, "model_provider") || "";
+}
+
+async function readCodexConfigProviderSecret(providerId: string, codexHome?: string): Promise<{ baseUrl: string; apiKey: string } | null> {
+  const text = await readOptionalFile(path.join(codexHome ?? path.join(os.homedir(), ".codex"), "config.toml"));
+  const section = readTomlSection(text, `[model_providers.${providerId}]`);
+  if (!section) return null;
+  const baseUrl = readTomlString(section, "base_url") || "";
+  const envKey = readTomlString(section, "env_key") || "";
+  const apiKey = readTomlString(section, "experimental_bearer_token") || await readCodexEnvKeySecret(envKey, text, codexHome);
+  return baseUrl || apiKey ? { baseUrl, apiKey } : null;
+}
+
+async function readCodexEnvKeySecret(envKey: string, configText: string, codexHome?: string): Promise<string> {
+  if (!envKey) return "";
+  const policyValue = readTomlString(readTomlSection(configText, "[shell_environment_policy.set]"), envKey);
+  if (policyValue) return policyValue;
+  const authText = await readOptionalFile(path.join(codexHome ?? path.join(os.homedir(), ".codex"), "auth.json"));
+  try {
+    const parsed = JSON.parse(authText) as Record<string, unknown>;
+    const value = parsed[envKey];
+    return typeof value === "string" ? value : "";
+  } catch {
+    return "";
+  }
 }
 
 export async function applyCodexApiConfig(options: {
@@ -233,6 +363,39 @@ function inferApiProviderPresetId(providerId: string, baseUrl: string | null): A
 
 function normalizeBaseUrl(baseUrl: string | null): string {
   return (baseUrl ?? "").trim().replace(/\/+$/, "");
+}
+
+function readCodexModelProviders(text: string): CodexConfigProviderEntry[] {
+  const providers: CodexConfigProviderEntry[] = [];
+  const sectionPattern = /^\s*\[model_providers\.([A-Za-z0-9_-]+|"(?:\\.|[^"\\])+")\]\s*$/;
+  const lines = text.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(sectionPattern);
+    if (!match) continue;
+    const rawId = match[1];
+    const id = rawId.startsWith('"') ? parseTomlString(rawId) || rawId.slice(1, -1) : rawId;
+    const sectionLines: string[] = [];
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      if (/^\s*\[/.test(lines[cursor])) break;
+      sectionLines.push(lines[cursor]);
+    }
+    const section = sectionLines.join("\n");
+    providers.push({
+      id,
+      name: readTomlString(section, "name") || id,
+      baseUrl: readTomlString(section, "base_url") || "",
+      wireApi: readTomlString(section, "wire_api") || "",
+      envKey: readTomlString(section, "env_key") || "",
+      requiresOpenaiAuth: readTomlBoolean(section, "requires_openai_auth"),
+      hasApiKey: Boolean(readTomlString(section, "experimental_bearer_token") || readTomlString(section, "env_key")),
+    });
+  }
+  return providers;
+}
+
+function readTomlBoolean(text: string, key: string): boolean {
+  const pattern = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=\\s*(true|false)\\s*$`, "m");
+  return text.match(pattern)?.[1] === "true";
 }
 
 function generatedCodexConfig(apiConfig: ApiConfig, providerId: string): string {

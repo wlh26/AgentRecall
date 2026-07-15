@@ -75,6 +75,10 @@ describe("stylesheet theme contract", () => {
     const apiDialog = stylesheet.match(/\.api-config-dialog\s*\{[^}]*\}/)?.[0] ?? "";
     const apiBody = stylesheet.match(/\.api-config-body\s*\{[^}]*\}/)?.[0] ?? "";
     const providerSwitch = stylesheet.match(/\.api-provider-switch\s*\{[^}]*\}/)?.[0] ?? "";
+    const codexProviderSwitch = stylesheet.match(/\.codex-provider-switch\s*\{[^}]*\}/)?.[0] ?? "";
+    const summaryProviderSwitch = stylesheet.match(/\.summary-provider-switch\s*\{[^}]*\}/)?.[0] ?? "";
+    const detectButton = stylesheet.match(/\.codex-model-detect-button\s*\{[^}]*\}/)?.[0] ?? "";
+    const modelConflict = stylesheet.match(/\.codex-model-conflict\s*\{[^}]*\}/)?.[0] ?? "";
     const apiField = stylesheet.match(/\.api-settings-form\s+\.settings-field\s*\{[^}]*\}/)?.[0] ?? "";
     const apiInput = stylesheet.match(/\.api-settings-form\s+\.settings-field\s+(?:input|select)[^{]*\{[^}]*\}/)?.[0] ?? "";
 
@@ -82,6 +86,13 @@ describe("stylesheet theme contract", () => {
     expect(apiBody).toMatch(/overflow-y:\s*auto/);
     expect(providerSwitch).toMatch(/grid-template-columns:\s*repeat\(auto-fit/);
     expect(providerSwitch).toMatch(/minmax\(92px,\s*1fr\)/);
+    expect(codexProviderSwitch).toMatch(/grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
+    expect(summaryProviderSwitch).toMatch(/grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
+    expect(detectButton).toMatch(/border:\s*1px\s+solid\s+var\(--accent-line\)/);
+    expect(detectButton).toMatch(/background:\s*var\(--accent-soft\)/);
+    expect(detectButton).toMatch(/font-weight:\s*650/);
+    expect(modelConflict).toMatch(/grid-template-columns:/);
+    expect(modelConflict).toMatch(/border:\s*1px\s+solid\s+var\(--accent-line\)/);
     expect(apiField).toMatch(/display:\s*grid/);
     expect(apiField).toMatch(/grid-template-columns:\s*minmax\(140px,\s*180px\)\s+minmax\(0,\s*1fr\)/);
     expect(apiInput).toMatch(/width:\s*100%/);

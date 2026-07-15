@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { API_PROVIDER_PRESETS, defaultApiConfig, mergeApiConfigWithProfileDefaults, normalizeApiConfig } from "./api-config";
-import { applyCodexApiConfig, codexProfileForApiConfig, loadCodexProfileDefaults } from "./codex-profile";
+import { applyCodexApiConfig, codexProfileForApiConfig, loadActiveCodexSummaryEndpointDefaults, loadCodexConfigSnapshot, loadCodexProfileDefaults, probeCodexModels } from "./codex-profile";
 
 async function withCodexHome<T>(run: (codexHome: string) => Promise<T>): Promise<T> {
   const codexHome = await mkdtemp(path.join(tmpdir(), "agent-session-search-codex-"));
@@ -185,6 +185,169 @@ describe("codex profile switching", () => {
     });
   });
 
+  it("loads a visual Codex config snapshot with active provider metadata", async () => {
+    await withCodexHome(async (codexHome) => {
+      await writeFile(
+        path.join(codexHome, "config.toml"),
+        [
+          'model_provider = "deepseek"',
+          'model = "deepseek-v4-flash"',
+          "",
+          "[model_providers.deepseek]",
+          'name = "DeepSeek"',
+          'base_url = "https://api.deepseek.com"',
+          'wire_api = "responses"',
+          "requires_openai_auth = true",
+          'env_key = "OPENAI_API_KEY"',
+          'experimental_bearer_token = "sk-test"',
+          "",
+          "[model_providers.longcat]",
+          'base_url = "https://api.longcat.chat/openai/v1"',
+        ].join("\n"),
+      );
+
+      await expect(loadCodexConfigSnapshot(codexHome)).resolves.toMatchObject({
+        exists: true,
+        activeProviderId: "deepseek",
+        activeModel: "deepseek-v4-flash",
+        activeProvider: {
+          id: "deepseek",
+          name: "DeepSeek",
+          baseUrl: "https://api.deepseek.com",
+          wireApi: "responses",
+          envKey: "OPENAI_API_KEY",
+          requiresOpenaiAuth: true,
+          hasApiKey: true,
+        },
+        providers: expect.arrayContaining([
+          expect.objectContaining({ id: "deepseek" }),
+          expect.objectContaining({ id: "longcat", name: "longcat" }),
+        ]),
+      });
+    });
+  });
+
+  it("probes OpenAI-compatible model names from a provider endpoint", async () => {
+    const result = await probeCodexModels(
+      { baseUrl: "https://api.example.com/v1/", apiKey: "sk-test" },
+      async (url, init) => {
+        expect(url).toBe("https://api.example.com/v1/models");
+        expect(init?.headers?.Authorization).toBe("Bearer sk-test");
+        return {
+          ok: true,
+          status: 200,
+          async json() {
+            return { data: [{ id: "z-model" }, { id: "a-model" }, { id: "a-model" }] };
+          },
+        };
+      },
+    );
+
+    expect(result).toEqual({ endpoint: "https://api.example.com/v1/models", models: ["a-model", "z-model"] });
+  });
+
+  it("can probe models using an API token already stored in config.toml", async () => {
+    await withCodexHome(async (codexHome) => {
+      await writeFile(
+        path.join(codexHome, "config.toml"),
+        [
+          "[model_providers.deepseek]",
+          'base_url = "https://api.deepseek.com"',
+          'experimental_bearer_token = "sk-from-config"',
+        ].join("\n"),
+      );
+
+      const result = await probeCodexModels(
+        { baseUrl: "", apiKey: "", providerId: "deepseek", codexHome },
+        async (_url, init) => {
+          expect(init?.headers?.Authorization).toBe("Bearer sk-from-config");
+          return { ok: true, status: 200, async json() { return { data: [{ id: "deepseek-chat" }] }; } };
+        },
+      );
+
+      expect(result.models).toEqual(["deepseek-chat"]);
+    });
+  });
+
+  it("can probe models through a Codex provider env_key without exposing the key in the UI", async () => {
+    await withCodexHome(async (codexHome) => {
+      await writeFile(
+        path.join(codexHome, "config.toml"),
+        [
+          "[model_providers.runway]",
+          'base_url = "http://127.0.0.1:18787/v1"',
+          'env_key = "OPENAI_API_KEY"',
+          "",
+          "[shell_environment_policy.set]",
+          'OPENAI_API_KEY = "sk-from-policy"',
+        ].join("\n"),
+      );
+
+      const result = await probeCodexModels(
+        { baseUrl: "", apiKey: "", providerId: "runway", codexHome },
+        async (_url, init) => {
+          expect(init?.headers?.Authorization).toBe("Bearer sk-from-policy");
+          return { ok: true, status: 200, async json() { return { data: [{ id: "clawbot:gpt-5.5" }] }; } };
+        },
+      );
+
+      expect(result.models).toEqual(["clawbot:gpt-5.5"]);
+    });
+  });
+
+  it("falls back to the active config.toml provider when no provider is passed", async () => {
+    await withCodexHome(async (codexHome) => {
+      await writeFile(
+        path.join(codexHome, "config.toml"),
+        [
+          'model_provider = "runway"',
+          "",
+          "[model_providers.runway]",
+          'base_url = "http://127.0.0.1:18787/v1"',
+          'env_key = "OPENAI_API_KEY"',
+        ].join("\n"),
+      );
+      await writeFile(path.join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-from-auth" }));
+
+      const result = await probeCodexModels(
+        { baseUrl: "", apiKey: "", codexHome },
+        async (_url, init) => {
+          expect(init?.headers?.Authorization).toBe("Bearer sk-from-auth");
+          return { ok: true, status: 200, async json() { return { data: [{ id: "clawbot:gpt-5.5" }] }; } };
+        },
+      );
+
+      expect(result.models).toEqual(["clawbot:gpt-5.5"]);
+    });
+  });
+
+  it("builds summary endpoint defaults from the active Codex provider", async () => {
+    await withCodexHome(async (codexHome) => {
+      await writeFile(
+        path.join(codexHome, "config.toml"),
+        [
+          'model_provider = "runway"',
+          'model = "clawbot:gpt-5.5"',
+          "",
+          "[model_providers.runway]",
+          'base_url = "http://127.0.0.1:18787/v1"',
+          'wire_api = "responses"',
+          'env_key = "OPENAI_API_KEY"',
+          "",
+          "[shell_environment_policy.set]",
+          'OPENAI_API_KEY = "sk-from-policy"',
+        ].join("\n"),
+      );
+
+      await expect(loadActiveCodexSummaryEndpointDefaults(codexHome)).resolves.toEqual({
+        baseUrl: "http://127.0.0.1:18787/v1",
+        model: "clawbot:gpt-5.5",
+        apiKey: "sk-from-policy",
+        apiFormat: "openai_responses",
+      });
+    });
+  });
+
   it("fills missing non-secret API settings from profile defaults without overriding saved fields", () => {
     expect(
       mergeApiConfigWithProfileDefaults(
@@ -215,6 +378,7 @@ describe("codex profile switching", () => {
       "longcat",
       "kimi",
       "xiaomi_mimo",
+      "custom",
     ]);
     expect(API_PROVIDER_PRESETS.find((preset) => preset.id === "deepseek")).toMatchObject({
       providerName: "deepseek",

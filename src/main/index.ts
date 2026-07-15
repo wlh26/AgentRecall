@@ -32,7 +32,7 @@ import {
 } from "../core/api-config";
 import { CodexChatProxy, type CodexChatProxyStatus } from "../core/codex-chat-proxy";
 import { applyClaudeApiConfig, loadClaudeApiConfigDefaults } from "../core/claude-profile";
-import { applyCodexApiConfig, loadCodexProfileDefaults } from "../core/codex-profile";
+import { applyCodexApiConfig, loadActiveCodexSummaryEndpointDefaults, loadCodexConfigSnapshot, loadCodexProfileDefaults, probeCodexModels } from "../core/codex-profile";
 import { indexMigratedSessionFile, syncDefaultSessionsInBatches, type IndexStatus } from "../core/indexer";
 import { formatSessionMarkdown, formatSessionPlainText } from "../core/format-session";
 import {
@@ -1355,6 +1355,20 @@ async function resolveSummaryEndpointFromSettings(): Promise<SummaryEndpoint | n
       // Best-effort cleanup if an ephemeral summary call is indexed before it exits.
     }
   };
+  if (settings.summarySource === "custom") {
+    const endpoint = resolveSummaryEndpointFromSettingsShared(settings, {});
+    if (endpoint) return endpoint;
+    const codexDefaults = await loadActiveCodexSummaryEndpointDefaults();
+    if (codexDefaults) {
+      return {
+        baseUrl: codexDefaults.baseUrl,
+        model: codexDefaults.model,
+        apiKey: codexDefaults.apiKey,
+        apiFormat: codexDefaults.apiFormat,
+      };
+    }
+    return buildCodexExecEndpointShared(settings, { onTemporarySession });
+  }
   return resolveSummaryEndpointFromSettingsShared(settings, { onTemporarySession });
 }
 
@@ -1831,6 +1845,17 @@ function registerIpc(): void {
   ipcMain.handle("app-update:install", () => startAppUpdate());
   ipcMain.handle("app-update:skip", (_event, untilNextVersion?: boolean) => skipCurrentAppUpdate(Boolean(untilNextVersion)));
   ipcMain.handle("settings:get", () => getHydratedSettings());
+  ipcMain.handle("codex-config:get", () => loadCodexConfigSnapshot());
+  ipcMain.handle("codex-config:probe-models", (_event, input: { baseUrl?: unknown; apiKey?: unknown; providerId?: unknown }) => {
+    const settings = getSettings();
+    const providerId = typeof input?.providerId === "string" && input.providerId ? input.providerId : undefined;
+    const savedKey = (providerId ? store.getApiProviderKey("codex", providerId) : "") || store.getApiProviderKey("codex", settings.apiConfig.customProviderId);
+    return probeCodexModels({
+      baseUrl: String(input?.baseUrl ?? ""),
+      apiKey: String(input?.apiKey ?? "") || savedKey,
+      providerId,
+    });
+  });
   ipcMain.handle("codex-profile:apply", (_event, apiConfig: Partial<ApiConfig>) => applyCodexApiConfigWithProxy(apiConfig));
   ipcMain.handle("claude-profile:apply", (_event, apiConfig: Partial<ClaudeApiConfig>) => applyClaudeApiConfig({ apiConfig }));
   ipcMain.handle("codex-chat-proxy:status", () => codexChatProxy?.getStatus() ?? null);

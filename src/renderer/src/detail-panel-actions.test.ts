@@ -320,6 +320,8 @@ describe("detail panel actions", () => {
 
     expect(resolver).toContain("await getHydratedSettings()");
     expect(resolver).toContain("resolveSummaryEndpointFromSettingsShared");
+    expect(resolver).toContain("loadActiveCodexSummaryEndpointDefaults");
+    expect(resolver).toContain("buildCodexExecEndpointShared(settings, { onTemporarySession })");
     expect(resolver).toContain("onTemporarySession");
     // The claude/codex exec format strings live in the shared module now.
     expect(summaryEndpointSource).toContain('settings.summarySource === "claude"');
@@ -327,6 +329,13 @@ describe("detail panel actions", () => {
     expect(summaryEndpointSource).toContain("codex_exec");
     expect(mainHandlerSource("session:summarize")).toContain("await resolveSummaryEndpointFromSettings()");
     expect(mainHandlerSource("session:summarize-missing")).toContain("await resolveSummaryEndpointFromSettings()");
+  });
+
+  it("exposes Codex config.toml visualization and model probing over IPC", () => {
+    expect(preloadSource).toContain("getCodexConfig");
+    expect(preloadSource).toContain("probeCodexModels");
+    expect(mainHandlerSource("codex-config:get")).toContain("loadCodexConfigSnapshot");
+    expect(mainHandlerSource("codex-config:probe-models")).toContain("probeCodexModels");
   });
 
   it("renders remote environment diagnostics in settings", () => {

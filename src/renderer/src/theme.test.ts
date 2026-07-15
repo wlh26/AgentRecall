@@ -95,19 +95,45 @@ describe("theme controls", () => {
     expect(apiDialog).toContain("setDraftClaudeApiConfig");
     expect(apiDialog).toContain("selectApiPreset");
     expect(apiDialog).toContain("selectClaudeApiPreset");
-    expect(apiDialog).toContain("onSettingsChange({ apiConfig: draftApiConfig })");
+    expect(apiDialog).toContain("onSettingsChange({ apiConfig: next })");
     expect(apiDialog).toContain("onSettingsChange({ claudeApiConfig: draftClaudeApiConfig })");
-    expect(apiDialog).toContain("onApplyToCodex(draftApiConfig)");
+    expect(apiDialog).toContain("onApplyToCodex(next)");
     expect(apiDialog).toContain("onApplyToClaude(draftClaudeApiConfig)");
-    expect(apiDialog).toMatch(/Apply to Codex/);
-    expect(apiDialog).toMatch(/Apply to Claude Code/);
-    expect(apiDialog).toMatch(/Save/);
+    expect(apiDialog).toMatch(/Write to Codex config/);
+    expect(apiDialog).toMatch(/Write to Claude Code settings/);
+    expect(apiDialog).toMatch(/Save in app only/);
+    expect(apiDialog).toMatch(/Save summary settings/);
+  });
+
+  it("visualizes Codex config.toml and supports detected model selection", () => {
+    const apiDialog = apiConfigDialogSource;
+
+    expect(apiDialog).toContain("codex-config-visualizer");
+    expect(apiDialog).toContain("getCodexConfig");
+    expect(apiDialog).toContain("probeCodexModels");
+    expect(apiDialog).toContain("Detect models");
+    expect(apiDialog).toContain("codex-model-detect-button");
+    expect(apiDialog).toContain("selectedCodexConfigProviderId");
+    expect(apiDialog).toContain("hydrateDraftFromCodexConfig");
+    expect(apiDialog).toContain("Config provider");
+    expect(apiDialog).toContain('customProviderId: "custom"');
+    expect(apiDialog).toContain('data-provider-labels="Codex Official CodexZH DeepSeek GLM LongCat Kimi MiMo Custom"');
+    expect(apiDialog).toContain("codexModelOptions.map");
+    expect(apiDialog).toContain("selectedDetectedCodexModel");
+    expect(apiDialog).toContain("codexModelConflictAction");
+    expect(apiDialog).toContain("codex-model-conflict");
+    expect(apiDialog).toContain("runCodexAction(codexModelConflictAction, codexModelConflict.selected)");
+    expect(apiDialog).toContain("runCodexAction(codexModelConflictAction, codexModelConflict.typed)");
   });
 
   it("omits CodexZH from direct AI summary API providers", () => {
     const summarySection = apiConfigDialogSource.slice(apiConfigDialogSource.indexOf("AI summary & search source"));
 
+    expect(apiConfigDialogSource).toContain('preset.id !== "codexzh"');
+    expect(apiConfigDialogSource).not.toContain('preset.id !== "custom" && preset.id !== "codexzh"');
     expect(summarySection).toContain("SUMMARY_API_PROVIDER_PRESETS.map");
+    expect(summarySection).toContain("summary-provider-switch");
+    expect(summarySection).toContain('settings?.summarySource === "custom"');
     expect(summarySection).not.toMatch(/CodexZH/);
   });
 

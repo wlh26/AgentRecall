@@ -4757,6 +4757,14 @@ select:focus-visible {
   white-space: nowrap;
 }
 
+.codex-provider-switch {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.summary-provider-switch {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .api-config-note {
   padding: 8px 10px;
   border: 1px solid var(--border-subtle);
@@ -4765,6 +4773,132 @@ select:focus-visible {
   color: var(--text-muted);
   font-size: 11.5px;
   line-height: 1.35;
+}
+
+.codex-config-visualizer {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.codex-config-visualizer > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--panel-subtle);
+  color: var(--text-dim);
+  text-align: left;
+}
+
+.codex-config-visualizer span,
+.codex-config-visualizer em,
+.codex-model-detect-field .api-config-status {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.codex-config-visualizer strong,
+.codex-config-visualizer em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codex-model-detect {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px;
+}
+
+.codex-model-detect-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 13px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+}
+
+.codex-model-detect-button:hover:not(:disabled) {
+  border-color: var(--accent-bright);
+  background: var(--accent-ring);
+  transform: translateY(-1px);
+}
+
+.codex-model-detect-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.codex-model-conflict {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) repeat(2, minmax(120px, 0.8fr)) max-content;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+}
+
+.codex-model-conflict > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.codex-model-conflict strong,
+.codex-model-conflict span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codex-model-conflict strong {
+  color: var(--accent-bright);
+  font-size: 12px;
+}
+
+.codex-model-conflict span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.codex-model-conflict button {
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codex-model-conflict button:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  background: var(--panel-hover);
+}
+
+.codex-model-conflict .ghost-action {
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .api-settings-form .settings-field {

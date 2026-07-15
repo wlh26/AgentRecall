@@ -3,7 +3,7 @@ import type { AiChatMessage } from "../core/ai-assistant";
 import type { ApiConfig, ClaudeApiConfig } from "../core/api-config";
 import type { ApplyClaudeProfileResult } from "../core/claude-profile";
 import type { CodexChatProxyStatus } from "../core/codex-chat-proxy";
-import type { ApplyCodexProfileResult } from "../core/codex-profile";
+import type { ApplyCodexProfileResult, CodexConfigSnapshot, CodexModelProbeResult } from "../core/codex-profile";
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import type { AppUpdateInstallResult, AppUpdateStatus } from "../core/app-update-types";
 import type { IndexStatus } from "../core/indexer";
@@ -97,6 +97,8 @@ const api = {
   skipAppUpdate: (untilNextVersion = false): Promise<AppUpdateStatus> => ipcRenderer.invoke("app-update:skip", untilNextVersion),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke("settings:get"),
   setSettings: (settings: AppSettingsUpdate): Promise<AppSettings> => ipcRenderer.invoke("settings:set", settings),
+  getCodexConfig: (): Promise<CodexConfigSnapshot> => ipcRenderer.invoke("codex-config:get"),
+  probeCodexModels: (input: { baseUrl: string; apiKey: string; providerId?: string }): Promise<CodexModelProbeResult> => ipcRenderer.invoke("codex-config:probe-models", input),
   applyCodexProfile: (apiConfig: ApiConfig): Promise<ApplyCodexProfileResult> => ipcRenderer.invoke("codex-profile:apply", apiConfig),
   getCodexChatProxyStatus: (): Promise<CodexChatProxyStatus | null> => ipcRenderer.invoke("codex-chat-proxy:status"),
   stopCodexChatProxy: (): Promise<null> => ipcRenderer.invoke("codex-chat-proxy:stop"),

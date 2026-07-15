@@ -103,6 +103,14 @@ export type AppSettingsUpdate = Partial<Omit<AppSettings, "apiConfig" | "claudeA
   summaryApiConfig?: Partial<ApiConfig>;
 };
 
+export const defaultSummaryApiConfig: ApiConfig = {
+  ...defaultApiConfig,
+  activeProvider: "custom",
+  customProviderId: "custom",
+  customProviderName: "Custom Codex",
+  customApiFormat: "openai_responses",
+};
+
 export const defaultSettings: AppSettings = {
   defaultTerminal: defaultTerminalFor(),
   globalShortcut: DEFAULT_GLOBAL_SHORTCUT,
@@ -132,7 +140,7 @@ export const defaultSettings: AppSettings = {
   summaryAutoBackfill: false,
   summaryMaxAgeDays: 30,
   compressionConcurrency: 8,
-  summarySource: "codex",
+  summarySource: "custom",
   sessionSearchMcpEnabled: true,
   skillSyncEnabled: false,
   skillSyncSupabaseUrl: "",
@@ -142,7 +150,7 @@ export const defaultSettings: AppSettings = {
   remoteSyncSupabaseAnonKey: "",
   apiConfig: defaultApiConfig,
   claudeApiConfig: defaultClaudeApiConfig,
-  summaryApiConfig: defaultApiConfig,
+  summaryApiConfig: defaultSummaryApiConfig,
 };
 
 export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpdate): AppSettings {

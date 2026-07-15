@@ -12,6 +12,7 @@ import {
   type ClaudeApiProviderPresetId,
 } from "../../../core/api-config";
 import type { AppSettings, AppSettingsUpdate } from "../../../core/platform";
+import type { CodexConfigSnapshot } from "../../../core/codex-profile";
 import type { SettingsFeedback } from "../app-types";
 import { localize, type LanguageMode } from "../language";
 
@@ -45,9 +46,17 @@ export function ApiConfigDialog({
     () => settings?.claudeApiConfig ?? { ...defaultClaudeApiConfig },
   );
   const [draftSummaryApiConfig, setDraftSummaryApiConfig] = useState<ApiConfig>(() => settings?.summaryApiConfig ?? { ...defaultApiConfig });
+  const [codexConfig, setCodexConfig] = useState<CodexConfigSnapshot | null>(null);
+  const [codexConfigError, setCodexConfigError] = useState("");
+  const [selectedCodexConfigProviderId, setSelectedCodexConfigProviderId] = useState("");
+  const [codexModelOptions, setCodexModelOptions] = useState<string[]>([]);
+  const [selectedDetectedCodexModel, setSelectedDetectedCodexModel] = useState("");
+  const [codexModelProbeStatus, setCodexModelProbeStatus] = useState<SettingsFeedback>(null);
+  const [codexModelConflictAction, setCodexModelConflictAction] = useState<"save" | "apply" | null>(null);
   const apiPresetSelectionRef = useRef(0);
   const claudeApiPresetSelectionRef = useRef(0);
   const summaryApiPresetSelectionRef = useRef(0);
+  const codexConfigHydrationRef = useRef("");
   const updateDraftApiConfig = (next: Partial<ApiConfig>) => setDraftApiConfig((current) => ({ ...current, ...next }));
   const updateDraftClaudeApiConfig = (next: Partial<ClaudeApiConfig>) => setDraftClaudeApiConfig((current) => ({ ...current, ...next }));
   const updateDraftSummaryApiConfig = (next: Partial<ApiConfig>) => setDraftSummaryApiConfig((current) => ({ ...current, ...next }));
@@ -57,22 +66,108 @@ export function ApiConfigDialog({
     CLAUDE_API_PROVIDER_PRESETS.find((preset) => preset.id === draftClaudeApiConfig.customProviderId) ?? CLAUDE_API_PROVIDER_PRESETS[0];
   const customClaudeName = selectedClaudePreset?.label ?? (draftClaudeApiConfig.customProviderName || "Claude Code");
 
+  const hydrateDraftFromCodexConfig = (snapshot: CodexConfigSnapshot) => {
+    const activeProvider = snapshot.providers.find((provider) => provider.id === snapshot.activeProviderId);
+    if (!activeProvider || snapshot.activeProviderId === "openai") {
+      setSelectedCodexConfigProviderId("");
+      setDraftApiConfig((current) => ({ ...current, activeProvider: "official" }));
+      return;
+    }
+    const preset = API_PROVIDER_PRESETS.find(
+      (item) => item.id !== "custom" && (item.id === activeProvider.id || normalizeProviderBaseUrl(item.baseUrl) === normalizeProviderBaseUrl(activeProvider.baseUrl)),
+    );
+    setSelectedCodexConfigProviderId(preset ? "" : activeProvider.id);
+    setDraftApiConfig((current) => ({
+      ...current,
+      activeProvider: "custom",
+      customProviderId: preset?.id ?? "custom",
+      customProviderName: preset?.providerName ?? activeProvider.name ?? activeProvider.id,
+      customBaseUrl: activeProvider.baseUrl || preset?.baseUrl || current.customBaseUrl,
+      customModel: snapshot.activeModel || preset?.model || current.customModel,
+      customApiFormat: activeProvider.wireApi === "chat" ? "openai_chat" : preset?.apiFormat ?? "openai_responses",
+    }));
+  };
+
   const selectApiPreset = async (presetId: ApiProviderPresetId) => {
     const selectionId = ++apiPresetSelectionRef.current;
     const preset = API_PROVIDER_PRESETS.find((item) => item.id === presetId) ?? API_PROVIDER_PRESETS[0];
     const apiKey = await window.sessionSearch.getApiProviderKey("codex", preset.id).catch(() => "");
     if (selectionId !== apiPresetSelectionRef.current) return;
-    setDraftApiConfig((current) => ({
-      ...current,
-      activeProvider: "custom",
-      customProviderId: preset.id,
-      customProviderName: preset.providerName,
-      customBaseUrl: preset.baseUrl,
-      customApiKey: apiKey,
-      customModel: preset.model,
-      customApiFormat: preset.apiFormat,
-    }));
+    if (preset.id === "custom") {
+      const activeProvider = codexConfig?.providers.find((provider) => provider.id === codexConfig.activeProviderId);
+      setSelectedCodexConfigProviderId(activeProvider?.id ?? "");
+      setDraftApiConfig((current) => ({
+        ...current,
+        activeProvider: "custom",
+        customProviderId: "custom",
+        customProviderName: activeProvider?.name || current.customProviderName || preset.providerName,
+        customBaseUrl: activeProvider?.baseUrl || current.customBaseUrl,
+        customApiKey: apiKey || current.customApiKey,
+        customModel: codexConfig?.activeModel || current.customModel,
+        customApiFormat: activeProvider?.wireApi === "chat" ? "openai_chat" : current.customApiFormat || preset.apiFormat,
+      }));
+    } else {
+      setSelectedCodexConfigProviderId("");
+      setDraftApiConfig((current) => ({
+        ...current,
+        activeProvider: "custom",
+        customProviderId: preset.id,
+        customProviderName: preset.providerName,
+        customBaseUrl: preset.baseUrl,
+        customApiKey: apiKey,
+        customModel: preset.model,
+        customApiFormat: preset.apiFormat,
+      }));
+    }
     setShowCodexApiKey(false);
+    setCodexModelOptions([]);
+    setSelectedDetectedCodexModel("");
+  };
+
+  const refreshCodexConfig = async () => {
+    setCodexConfigError("");
+    try {
+      const snapshot = await window.sessionSearch.getCodexConfig();
+      setCodexConfig(snapshot);
+      const hydrationKey = `${snapshot.configPath}:${snapshot.activeProviderId}:${snapshot.activeModel}:${snapshot.providers.map((provider) => `${provider.id}:${provider.baseUrl}`).join("|")}`;
+      if (hydrationKey !== codexConfigHydrationRef.current) {
+        codexConfigHydrationRef.current = hydrationKey;
+        hydrateDraftFromCodexConfig(snapshot);
+      }
+    } catch (error) {
+      setCodexConfigError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const selectCodexConfigProvider = (providerId: string) => {
+    const provider = codexConfig?.providers.find((item) => item.id === providerId);
+    if (!provider) return;
+    setSelectedCodexConfigProviderId(provider.id);
+    updateDraftApiConfig({
+      activeProvider: "custom",
+      customProviderId: "custom",
+      customProviderName: provider.name || provider.id,
+      customBaseUrl: provider.baseUrl,
+      customApiFormat: provider.wireApi === "chat" ? "openai_chat" : "openai_responses",
+    });
+    setCodexModelOptions([]);
+    setSelectedDetectedCodexModel("");
+  };
+
+  const detectCodexModels = async () => {
+    setCodexModelProbeStatus({ kind: "running", message: l("Detecting models...", "正在探测模型...") });
+    try {
+      const result = await window.sessionSearch.probeCodexModels({
+        baseUrl: draftApiConfig.customBaseUrl,
+        apiKey: draftApiConfig.customApiKey,
+        providerId: selectedCodexConfigProviderId || codexConfig?.activeProviderId,
+      });
+      setCodexModelOptions(result.models);
+      setSelectedDetectedCodexModel(result.models.includes(draftApiConfig.customModel) ? draftApiConfig.customModel : "");
+      setCodexModelProbeStatus({ kind: "success", message: l(`Found ${result.models.length} models from ${result.endpoint}.`, `已从 ${result.endpoint} 找到 ${result.models.length} 个模型。`) });
+    } catch (error) {
+      setCodexModelProbeStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
   };
 
   const selectClaudeApiPreset = async (presetId: ClaudeApiProviderPresetId) => {
@@ -114,16 +209,25 @@ export function ApiConfigDialog({
     if (!preset) return;
     const apiKey = await window.sessionSearch.getApiProviderKey("summary", preset.id).catch(() => "");
     if (selectionId !== summaryApiPresetSelectionRef.current) return;
-    const next: ApiConfig = {
-      ...(settings?.summaryApiConfig ?? draftSummaryApiConfig),
-      activeProvider: "custom",
-      customProviderId: preset.id,
-      customProviderName: preset.providerName,
-      customBaseUrl: preset.baseUrl,
-      customApiKey: apiKey,
-      customModel: preset.model,
-      customApiFormat: preset.apiFormat,
-    };
+    const current = settings?.summaryApiConfig ?? draftSummaryApiConfig;
+    const next: ApiConfig = preset.id === "custom"
+      ? {
+          ...current,
+          activeProvider: "custom",
+          customProviderId: "custom",
+          customProviderName: current.customProviderName || preset.providerName,
+          customApiKey: apiKey || current.customApiKey,
+        }
+      : {
+          ...current,
+          activeProvider: "custom",
+          customProviderId: preset.id,
+          customProviderName: preset.providerName,
+          customBaseUrl: preset.baseUrl,
+          customApiKey: apiKey,
+          customModel: preset.model,
+          customApiFormat: preset.apiFormat,
+        };
     setDraftSummaryApiConfig(next);
     onSettingsChange({ summarySource: "custom", summaryApiConfig: next });
     setShowSummaryApiKey(false);
@@ -135,14 +239,52 @@ export function ApiConfigDialog({
     setDraftSummaryApiConfig(settings?.summaryApiConfig ?? { ...defaultApiConfig });
   }, [settings?.apiConfig, settings?.claudeApiConfig, settings?.summaryApiConfig]);
 
+  useEffect(() => {
+    if (apiTarget === "codex") void refreshCodexConfig();
+  }, [apiTarget]);
+
+  const codexModelConflict =
+    apiTarget === "codex" &&
+    draftApiConfig.activeProvider === "custom" &&
+    selectedDetectedCodexModel &&
+    draftApiConfig.customModel.trim() &&
+    selectedDetectedCodexModel !== draftApiConfig.customModel.trim()
+      ? { selected: selectedDetectedCodexModel, typed: draftApiConfig.customModel.trim() }
+      : null;
+
+  const runCodexAction = (action: "save" | "apply", model?: string) => {
+    const fallbackSelectedModel = selectedDetectedCodexModel && !draftApiConfig.customModel.trim() ? selectedDetectedCodexModel : "";
+    const nextModel = model || fallbackSelectedModel;
+    const next = nextModel ? { ...draftApiConfig, customModel: nextModel } : draftApiConfig;
+    setCodexModelConflictAction(null);
+    if (model) setDraftApiConfig(next);
+    if (action === "save") onSettingsChange({ apiConfig: next });
+    else {
+      onApplyToCodex(next);
+      window.setTimeout(() => void refreshCodexConfig(), 600);
+    }
+  };
+
   const saveDraft = () => {
-    if (apiTarget === "codex") onSettingsChange({ apiConfig: draftApiConfig });
+    if (apiTarget === "codex") {
+      if (codexModelConflict) {
+        setCodexModelConflictAction("save");
+        return;
+      }
+      runCodexAction("save");
+    }
     else if (apiTarget === "claude") onSettingsChange({ claudeApiConfig: draftClaudeApiConfig });
     else onSettingsChange({ summarySource: "custom", summaryApiConfig: draftSummaryApiConfig });
   };
 
   const applyDraft = () => {
-    if (apiTarget === "codex") onApplyToCodex(draftApiConfig);
+    if (apiTarget === "codex") {
+      if (codexModelConflict) {
+        setCodexModelConflictAction("apply");
+        return;
+      }
+      runCodexAction("apply");
+    }
     else if (apiTarget === "claude") onApplyToClaude(draftClaudeApiConfig);
   };
 
@@ -178,11 +320,23 @@ export function ApiConfigDialog({
                   )}
                 </p>
               </header>
+              <div className="codex-config-visualizer">
+                <div>
+                  <span>{l("Active config", "当前配置")}</span>
+                  <strong>{codexConfig?.activeProviderId ?? "openai"}</strong>
+                  <em>{codexConfig?.activeModel || l("Default model", "默认模型")}</em>
+                </div>
+                <div>
+                  <span>{l("Config file", "配置文件")}</span>
+                  <strong>{codexConfig?.configPath ?? "~/.codex/config.toml"}</strong>
+                  <em>{codexConfigError || (codexConfig?.exists ? l(`${codexConfig.providers.length} providers`, `${codexConfig.providers.length} 个供应商`) : l("Not created yet", "尚未创建"))}</em>
+                </div>
+              </div>
               <div
-                className="api-provider-switch"
+                className="api-provider-switch codex-provider-switch"
                 role="group"
                 aria-label={l("Codex provider", "Codex 供应商")}
-                data-provider-labels="CodexZH DeepSeek GLM LongCat Kimi MiMo"
+                data-provider-labels="Codex Official CodexZH DeepSeek GLM LongCat Kimi MiMo Custom"
               >
                 <button
                   type="button"
@@ -205,7 +359,7 @@ export function ApiConfigDialog({
                     onClick={() => void selectApiPreset(preset.id)}
                   >
                     <strong>{preset.label}</strong>
-                    <span>{preset.model}</span>
+                    <span>{preset.model || l("Manual route", "手动配置")}</span>
                   </button>
                 ))}
               </div>
@@ -220,7 +374,12 @@ export function ApiConfigDialog({
               {draftApiConfig.activeProvider === "custom" ? (
                 <>
                   <div className="api-config-note">
-                    {draftApiConfig.customProviderId === "codexzh"
+                    {draftApiConfig.customProviderId === "custom"
+                      ? l(
+                          "Apply writes this custom route into ~/.codex/config.toml and preserves existing auth.json.",
+                          "应用时会把这个自定义路径写入 ~/.codex/config.toml，并保留现有 auth.json。",
+                        )
+                      : draftApiConfig.customProviderId === "codexzh"
                       ? l(
                           "Apply updates the active ~/.codex/config.toml route and preserves existing auth.json.",
                           "应用时只更新当前 ~/.codex/config.toml 的路由配置，并保留现有 auth.json。",
@@ -230,6 +389,28 @@ export function ApiConfigDialog({
                           `应用时会把 ${customName} 路由合并到 ~/.codex/config.toml，并保留现有 auth.json。`,
                         )}
                   </div>
+                  {draftApiConfig.customProviderId === "custom" && codexConfig?.providers.some((provider) => provider.id !== "openai") ? (
+                    <label className="settings-field">
+                      <div className="settings-field-text">
+                        <span className="settings-field-title">{l("Config provider", "配置供应商")}</span>
+                        <span className="settings-field-sub">
+                          {l("Choose an existing ~/.codex/config.toml provider as the Custom baseline.", "选择 ~/.codex/config.toml 里的现有供应商作为 Custom 基线。")}
+                        </span>
+                      </div>
+                      <select
+                        value={selectedCodexConfigProviderId}
+                        disabled={!settings || saving}
+                        onChange={(event) => selectCodexConfigProvider(event.currentTarget.value)}
+                      >
+                        <option value="">{l("Manual custom route", "手动自定义路径")}</option>
+                        {codexConfig.providers.filter((provider) => provider.id !== "openai").map((provider) => (
+                          <option key={provider.id} value={provider.id}>
+                            {provider.name || provider.id}{provider.baseUrl ? ` · ${provider.baseUrl}` : ""}{provider.envKey ? ` · ${provider.envKey}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
                   <label className="settings-field">
                     <div className="settings-field-text">
                       <span className="settings-field-title">{l("Provider name", "供应商名称")}</span>
@@ -286,6 +467,33 @@ export function ApiConfigDialog({
                       </button>
                     </div>
                   </label>
+                  <div className="settings-field codex-model-detect-field">
+                    <div className="settings-field-text">
+                      <span className="settings-field-title">{l("Available models", "可用模型")}</span>
+                      <span className="settings-field-sub">{l("Detect /v1/models with the typed key or the saved key, then choose or type manually.", "使用输入框或已保存的 API Key 探测 /v1/models 后选择，也可以继续手动填写。")}</span>
+                    </div>
+                    <div className="codex-model-detect">
+                      <button
+                        type="button"
+                        className="codex-model-detect-button"
+                        disabled={!settings || saving || codexModelProbeStatus?.kind === "running"}
+                        onClick={() => void detectCodexModels()}
+                      >
+                        {l("Detect models", "探测模型")}
+                      </button>
+                      {codexModelOptions.length > 0 ? (
+                        <select
+                          value={selectedDetectedCodexModel}
+                          disabled={!settings || saving}
+                          onChange={(event) => setSelectedDetectedCodexModel(event.currentTarget.value)}
+                        >
+                          <option value="">{l("Select detected model", "选择探测到的模型")}</option>
+                          {codexModelOptions.map((model) => <option key={model} value={model}>{model}</option>)}
+                        </select>
+                      ) : null}
+                    </div>
+                    {codexModelProbeStatus ? <div className={`api-config-status ${codexModelProbeStatus.kind}`}>{codexModelProbeStatus.message}</div> : null}
+                  </div>
                   <label className="settings-field">
                     <div className="settings-field-text">
                       <span className="settings-field-title">{l("Model", "模型")}</span>
@@ -299,6 +507,23 @@ export function ApiConfigDialog({
                       onChange={(event) => updateDraftApiConfig({ customModel: event.currentTarget.value })}
                     />
                   </label>
+                  {codexModelConflictAction && codexModelConflict ? (
+                    <div className="codex-model-conflict" role="alertdialog" aria-label={l("Choose Codex model", "选择 Codex 模型")}>
+                      <div>
+                        <strong>{l("Choose which model to use", "选择要使用的模型")}</strong>
+                        <span>{l("The detected selection and typed model are different.", "探测选择和手写模型不一致。")}</span>
+                      </div>
+                      <button type="button" disabled={!settings || saving} onClick={() => runCodexAction(codexModelConflictAction, codexModelConflict.selected)}>
+                        {codexModelConflict.selected}
+                      </button>
+                      <button type="button" disabled={!settings || saving} onClick={() => runCodexAction(codexModelConflictAction, codexModelConflict.typed)}>
+                        {codexModelConflict.typed}
+                      </button>
+                      <button type="button" className="ghost-action" disabled={!settings || saving} onClick={() => setCodexModelConflictAction(null)}>
+                        {l("Cancel", "取消")}
+                      </button>
+                    </div>
+                  ) : null}
                   <label className="settings-field">
                     <div className="settings-field-text">
                       <span className="settings-field-title">{l("API format", "API 格式")}</span>
@@ -525,10 +750,10 @@ export function ApiConfigDialog({
                   )}
                 </p>
               </header>
-              <div className="api-provider-switch" role="group" aria-label={l("AI summary & search source", "AI 摘要与搜索来源")}>
+              <div className="api-provider-switch summary-provider-switch" role="group" aria-label={l("AI summary & search source", "AI 摘要与搜索来源")}>
                 <button
                   type="button"
-                  className={(settings?.summarySource ?? "codex") === "codex" ? "active" : ""}
+                  className={settings?.summarySource === "codex" ? "active" : ""}
                   disabled={!settings || saving}
                   onClick={() => onSettingsChange({ summarySource: "codex" })}
                 >
@@ -553,7 +778,7 @@ export function ApiConfigDialog({
                     onClick={() => void selectSummaryPreset(preset.id)}
                   >
                     <strong>{preset.label}</strong>
-                    <span>{preset.model}</span>
+                    <span>{preset.model || l("Manual route", "手动配置")}</span>
                   </button>
                 ))}
               </div>
@@ -618,15 +843,25 @@ export function ApiConfigDialog({
             {feedback?.message ?? ""}
           </span>
           <button type="button" className={apiTarget === "summary" ? "primary-action" : ""} disabled={!settings || saving} onClick={saveDraft}>
-            {l("Save", "保存")}
+            {apiTarget === "summary"
+              ? l("Save summary settings", "保存摘要设置")
+              : apiTarget === "codex"
+              ? l("Save in app only", "仅保存到应用")
+              : l("Save in app only", "仅保存到应用")}
           </button>
           {apiTarget === "summary" ? null : (
             <button type="button" className="primary-action" disabled={!settings || saving} onClick={applyDraft}>
-              {apiTarget === "codex" ? l("Apply to Codex", "应用到 Codex") : l("Apply to Claude Code", "应用到 Claude Code")}
+              {apiTarget === "codex"
+                ? l("Write to Codex config", "写入 Codex 配置")
+                : l("Write to Claude Code settings", "写入 Claude Code 设置")}
             </button>
           )}
         </div>
       </section>
     </div>
   );
+}
+
+function normalizeProviderBaseUrl(baseUrl: string): string {
+  return baseUrl.trim().replace(/\/+$/, "");
 }

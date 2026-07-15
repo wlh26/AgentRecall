@@ -1,7 +1,7 @@
 export type ApiFormat = "openai_chat" | "openai_responses";
 export type ClaudeApiFormat = "anthropic" | "openai_chat" | "openai_responses" | "gemini_native";
 export type ApiProviderChoice = "official" | "custom";
-export type ApiProviderPresetId = "codexzh" | "deepseek" | "zhipu_glm" | "longcat" | "kimi" | "xiaomi_mimo";
+export type ApiProviderPresetId = "custom" | "codexzh" | "deepseek" | "zhipu_glm" | "longcat" | "kimi" | "xiaomi_mimo";
 export type ClaudeApiProviderPresetId = "custom" | "deepseek" | "zhipu_glm" | "longcat" | "kimi" | "xiaomi_mimo";
 export type ClaudeApiKeyField = "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY";
 
@@ -103,6 +103,14 @@ export const API_PROVIDER_PRESETS: ApiProviderPreset[] = [
     baseUrl: "https://api.xiaomimimo.com/v1",
     model: "mimo-v2.5-pro",
     apiFormat: "openai_chat",
+  },
+  {
+    id: "custom",
+    label: "Custom",
+    providerName: "Custom Codex",
+    baseUrl: "",
+    model: "",
+    apiFormat: "openai_responses",
   },
 ];
 
