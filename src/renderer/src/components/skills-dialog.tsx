@@ -73,7 +73,28 @@ export function SkillsDialog({
   const [deletingSkill, setDeletingSkill] = useState(false);
   const [uploadConfirm, setUploadConfirm] = useState<{ skill: InstalledSkill; conflict: SkillSyncUploadConflict } | null>(null);
   const entries = useMemo(() => buildUnifiedSkillEntries(snapshot, syncSnapshot), [snapshot, syncSnapshot]);
-  const filteredEntries = useMemo(() => filterAndSortUnifiedSkillEntries(entries, query, sourceFilter, sortKey), [entries, query, sourceFilter, sortKey]);
+  const filteredEntries = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return entries
+      .filter((entry) => {
+        const matchesSource = sourceFilter === "all"
+          || (sourceFilter === "codex" && (entry.local?.agent ?? entry.remote?.agent) === "codex")
+          || (sourceFilter === "claude" && (entry.local?.agent ?? entry.remote?.agent) === "claude")
+          || (sourceFilter === "shared" && entry.source === "codex-shared")
+          || (sourceFilter === "project" && (entry.source === "codex-project" || entry.source === "claude-project"));
+        if (!matchesSource || !normalizedQuery) return matchesSource;
+        return [entry.name, entry.description, entry.identity, entry.local?.path ?? "", entry.remote?.relativePath ?? ""]
+          .join("\n")
+          .toLowerCase()
+          .includes(normalizedQuery);
+      })
+      .sort((a, b) => {
+        const usageOrder = sortKey === "usage-asc"
+          ? (a.local?.usageCount ?? 0) - (b.local?.usageCount ?? 0)
+          : (b.local?.usageCount ?? 0) - (a.local?.usageCount ?? 0);
+        return usageOrder || a.name.localeCompare(b.name) || a.identity.localeCompare(b.identity);
+      });
+  }, [entries, query, sourceFilter, sortKey]);
   const visibleRoots = useMemo(() => summarizeSkillRoots(snapshot.roots), [snapshot.roots]);
   const selectedEntry = filteredEntries.find((entry) => entry.id === selectedEntryId) ?? filteredEntries[0] ?? null;
   const selectedSkill = selectedEntry?.local ?? null;
@@ -422,7 +443,11 @@ export function SkillsDialog({
                   selectedSkill ? <>
                     <div className="skill-detail-actions">
                       <span>{skillManagementLabel(selectedSkill.source, language) ?? l("Installed on this device", "已安装在此设备")}</span>
-                      {isSyncableSkill(selectedSkill) && syncReady && (selectedEntry.state === "local-only" || selectedEntry.state === "local-newer" || selectedEntry.state === "conflict") ? <button type="button" disabled={loading} onClick={() => void handleUpload(selectedSkill)}><Upload size={14} />{selectedSkillBinding ? l("Upload new version", "上传新版本") : l("Upload", "上传")}</button> : null}
+                      {(selectedSkill.source === "codex-user" || selectedSkill.source === "claude-user" || selectedSkill.source === "codex-shared")
+                        && syncReady
+                        && (selectedEntry.state === "local-only" || selectedEntry.state === "local-newer" || selectedEntry.state === "conflict")
+                        ? <button type="button" disabled={loading} onClick={() => void handleUpload(selectedSkill)}><Upload size={14} />{selectedSkillBinding ? l("Upload new version", "上传新版本") : l("Upload", "上传")}</button>
+                        : null}
                     </div>
                     <dl className="skill-meta">
                       <div><dt>{l("Agent", "Agent")}</dt><dd>{selectedSkill.agent === "codex" ? "Codex" : "Claude Code"}</dd></div>
@@ -521,44 +546,6 @@ export function SkillsDialog({
   );
 }
 
-function isSyncableSkill(skill: Pick<InstalledSkill, "source">): boolean {
-  return skill.source === "codex-user" || skill.source === "claude-user" || skill.source === "codex-shared";
-}
-
-function filterAndSortUnifiedSkillEntries(
-  entries: UnifiedSkillEntry[],
-  query: string,
-  sourceFilter: SkillSourceFilter,
-  sortKey: SkillSortKey,
-): UnifiedSkillEntry[] {
-  const normalizedQuery = query.trim().toLowerCase();
-  const filtered = entries.filter((entry) => {
-    if (!entryMatchesSourceFilter(entry, sourceFilter)) return false;
-    if (!normalizedQuery) return true;
-    return [
-      entry.name,
-      entry.description,
-      entry.identity,
-      entry.local?.path ?? "",
-      entry.remote?.relativePath ?? "",
-    ].join("\n").toLowerCase().includes(normalizedQuery);
-  });
-  return filtered.sort((a, b) => {
-    const aUsage = a.local?.usageCount ?? 0;
-    const bUsage = b.local?.usageCount ?? 0;
-    const usageOrder = sortKey === "usage-asc" ? aUsage - bUsage : bUsage - aUsage;
-    return usageOrder || a.name.localeCompare(b.name) || a.identity.localeCompare(b.identity);
-  });
-}
-
-function entryMatchesSourceFilter(entry: UnifiedSkillEntry, filter: SkillSourceFilter): boolean {
-  if (filter === "all") return true;
-  if (filter === "codex") return (entry.local?.agent ?? entry.remote?.agent) === "codex";
-  if (filter === "claude") return (entry.local?.agent ?? entry.remote?.agent) === "claude";
-  if (filter === "shared") return entry.source === "codex-shared";
-  return entry.source === "codex-project" || entry.source === "claude-project";
-}
-
 function skillSyncVersionsLabel(entry: UnifiedSkillEntry, language: LanguageMode): string {
   const managed = entry.local ? skillManagementLabel(entry.local.source, language) : null;
   if (managed) return managed;
@@ -584,7 +571,15 @@ function SkillDiffView({ snapshot, language }: { snapshot: SkillDiffSnapshot; la
         {snapshot.files.map((file) => (
           <details key={file.relativePath} className={`skill-diff-file ${file.status}`} open={file.relativePath === "SKILL.md" && file.status !== "unchanged"}>
             <summary>
-              <span className="skill-diff-status">{skillFileDiffStatusLabel(file.status, language)}</span>
+              <span className="skill-diff-status">
+                {file.status === "added"
+                  ? l("Cloud only", "仅云端")
+                  : file.status === "removed"
+                    ? l("Local only", "仅本地")
+                    : file.status === "modified"
+                      ? l("Changed", "已修改")
+                      : l("Same", "相同")}
+              </span>
               <code>{file.relativePath}</code>
               <span>{file.binary ? l("Binary", "二进制") : `${file.localSize} B → ${file.remoteSize} B`}</span>
             </summary>
@@ -594,13 +589,6 @@ function SkillDiffView({ snapshot, language }: { snapshot: SkillDiffSnapshot; la
       </div>
     </div>
   );
-}
-
-function skillFileDiffStatusLabel(status: import("../../../core/skill-diff").SkillFileDiffStatus, language: LanguageMode): string {
-  if (status === "added") return localize(language, "Cloud only", "仅云端");
-  if (status === "removed") return localize(language, "Local only", "仅本地");
-  if (status === "modified") return localize(language, "Changed", "已修改");
-  return localize(language, "Same", "相同");
 }
 
 const SKILL_SOURCE_FILTERS: SkillSourceFilter[] = ["all", "codex", "claude", "shared", "project"];

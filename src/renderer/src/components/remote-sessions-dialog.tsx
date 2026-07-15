@@ -41,11 +41,6 @@ export function sessionCopySummary(item: SessionSyncItem, side: "local" | "remot
   };
 }
 
-export function failedSessionSelectionIds(items: SessionSyncItem[], failedRemoteIds: string[]): string[] {
-  const failed = new Set(failedRemoteIds);
-  return items.flatMap((item) => item.remote && failed.has(item.remote.id) ? [item.id] : []);
-}
-
 function syncItemTitle(item: SessionSyncItem): string {
   return item.local?.displayTitle || item.remote?.title || "Untitled session";
 }
@@ -290,11 +285,12 @@ export function RemoteSessionsDialog({
       const removedIds = new Set([...result.deletedIds, ...result.missingIds]);
       setDeleteCandidates([]);
       await refresh();
-      setSelectedIds(new Set(failedSessionSelectionIds(deleteCandidates, result.failures.map((failure) => failure.id))));
+      const failedRemoteIds = new Set(result.failures.map((failure) => failure.id));
+      setSelectedIds(new Set(deleteCandidates.flatMap((item) => item.remote && failedRemoteIds.has(item.remote.id) ? [item.id] : [])));
       if (result.failures.length > 0) {
         const details = result.failures
           .slice(0, 3)
-            .map((failure) => `${deleteCandidates.find((item) => item.remote?.id === failure.id)?.remote?.title ?? failure.id}: ${failure.message}`)
+          .map((failure) => `${deleteCandidates.find((item) => item.remote?.id === failure.id)?.remote?.title ?? failure.id}: ${failure.message}`)
           .join(" · ");
         setFeedback({
           kind: "error",

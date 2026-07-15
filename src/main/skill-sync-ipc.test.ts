@@ -22,14 +22,14 @@ describe("skill sync IPC", () => {
     expect(mainSource).toContain("buildSkillDiffSnapshot(localSnapshot, remoteSnapshot)");
     expect(mainSource).toContain("findInstalledSkillByPath(localSkillPath)");
     expect(mainSource).toContain("getRemoteSkillVersionDetail(remoteSkillId)");
-    expect(mainSource).toContain("filesWithSkillMarkdown(remoteSkill.markdown");
+    expect(mainSource).toContain('file.relativePath === "SKILL.md"');
     expect(preloadSource).toContain("getSyncedSkillDiff:");
   });
 
   it("resolves portable identity aliases before uploads and cloud deletion", () => {
     expect(mainSource).toContain("groupRemoteSkillVersions(await client.listRemoteSkillVersions())");
     expect(mainSource).toContain("client.deleteRemoteSkillVersions(group.versions.map");
-    expect(mainSource).toContain("skillUploadRequiresConfirmation(latest.contentHash");
+    expect(mainSource).toContain("latest.contentHash !== existingBinding.lastContentHash");
   });
 
   it("exposes first-time setup SQL and a project-specific SQL Editor link", () => {

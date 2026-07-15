@@ -43,6 +43,7 @@ test("creates a structured update manifest, checksum, and release notes from one
 
 test("keeps update manifest URLs compatible after the repository rename", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agent-session-release-rename-"));
+  temporaryDirectories.add(root);
   const notePath = path.join(root, "note.md");
   const packagePath = path.join(root, "agent-session-search-0.5.0.tgz");
   const outputDirectory = path.join(root, "release");

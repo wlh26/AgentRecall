@@ -29,11 +29,6 @@ export interface SkillDiffSnapshot {
   files: SkillFileDiff[];
 }
 
-export function filesWithSkillMarkdown(markdown: string, files: SkillSyncFile[]): SkillSyncFile[] {
-  if (files.some((file) => file.relativePath === "SKILL.md")) return files;
-  return [{ relativePath: "SKILL.md", contentBase64: Buffer.from(markdown, "utf8").toString("base64") }, ...files];
-}
-
 export function buildSkillDiffSnapshot(
   local: SkillContentSnapshot | null,
   remote: SkillContentSnapshot | null,

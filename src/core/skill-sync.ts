@@ -273,10 +273,6 @@ export function skillSyncFingerprint(skill: Pick<InstalledSkill, "source" | "roo
   return createHash("sha256").update(location.identity).digest("hex");
 }
 
-export function skillUploadRequiresConfirmation(remoteContentHash: string, lastSyncedContentHash: string | null | undefined): boolean {
-  return !lastSyncedContentHash || remoteContentHash !== lastSyncedContentHash;
-}
-
 // Stable content hash over the SKILL.md body plus every bundled file (ordering is fixed by
 // collectSkillDirectoryFiles), used to skip re-uploading a version when nothing changed.
 export function skillSyncContentHash(markdown: string, files: SkillSyncFile[]): string {
@@ -369,11 +365,6 @@ export function groupRemoteSkillVersions(versions: RemoteSkillVersion[]): Remote
     });
   }
   return result.sort((a, b) => Date.parse(b.latest.updatedAt) - Date.parse(a.latest.updatedAt) || a.name.localeCompare(b.name));
-}
-
-export function nextSkillVersionForFingerprint(group: RemoteSkillGroup | null | undefined, fingerprint: string): number {
-  const versions = group?.versions.filter((version) => version.localFingerprint === fingerprint).map((version) => version.version) ?? [];
-  return Math.max(0, ...versions) + 1;
 }
 
 export class SupabaseSkillSyncClient {

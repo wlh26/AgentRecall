@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { SessionSyncItem } from "../../core/remote-session-sync";
 import type { SessionSearchResult } from "../../core/types";
-import { failedSessionSelectionIds, primarySessionAction, sessionCopySummary } from "./components/remote-sessions-dialog";
+import { primarySessionAction, sessionCopySummary } from "./components/remote-sessions-dialog";
 
 const source = readFileSync(new URL("./components/remote-sessions-dialog.tsx", import.meta.url), "utf8");
 const stylesheet = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
@@ -91,13 +91,6 @@ describe("remote session comparison cards", () => {
     expect(sessionCopySummary(item("local-newer"), "remote")).toMatchObject({ present: true, updatedAt: 2_000, messageCount: 39, syncedAt: 3_000 });
     expect(sessionCopySummary(item("local-only", { remote: false }), "remote")).toEqual({ present: false, missing: "not-uploaded" });
     expect(sessionCopySummary(item("remote-only", { local: false }), "local")).toEqual({ present: false, missing: "no-local-copy" });
-  });
-
-  it("keeps failed cloud deletions selected by the unified row id", () => {
-    const first = item("synced");
-    first.id = "binding:local-remote";
-    first.remote!.id = "remote-record";
-    expect(failedSessionSelectionIds([first], ["remote-record"])).toEqual(["binding:local-remote"]);
   });
 
   it("renders a two-column comparison, one primary action, and a secondary menu", () => {

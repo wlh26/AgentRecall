@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSkillDiffSnapshot, filesWithSkillMarkdown, type SkillContentSnapshot } from "./skill-diff";
+import { buildSkillDiffSnapshot, type SkillContentSnapshot } from "./skill-diff";
 
 function file(relativePath: string, content: string | Buffer) {
   return {
@@ -66,10 +66,4 @@ describe("Skill content diff", () => {
     expect(remoteOnly.files[0].status).toBe("added");
   });
 
-  it("synthesizes SKILL.md for older cloud versions without bundled file metadata", () => {
-    expect(filesWithSkillMarkdown("# Legacy", [])).toEqual([
-      { relativePath: "SKILL.md", contentBase64: Buffer.from("# Legacy").toString("base64") },
-    ]);
-    expect(filesWithSkillMarkdown("ignored", [file("SKILL.md", "existing")])).toEqual([file("SKILL.md", "existing")]);
-  });
 });

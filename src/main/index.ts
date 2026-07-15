@@ -103,11 +103,9 @@ import {
   buildSkillSyncSetupSql,
   buildSkillVersionBasePayload,
   groupRemoteSkillVersions,
-  nextSkillVersionForFingerprint,
   skillSyncFilesFromMetadata,
   skillSyncLocalContentHash,
   skillSyncFingerprint,
-  skillUploadRequiresConfirmation,
   SupabaseSkillSyncClient,
   type RemoteSkill,
   type SkillSyncInstallResult,
@@ -116,7 +114,7 @@ import {
   type SkillSyncSnapshot,
   type SkillSyncUploadOutcome,
 } from "../core/skill-sync";
-import { buildSkillDiffSnapshot, filesWithSkillMarkdown, type SkillContentSnapshot, type SkillDiffSnapshot } from "../core/skill-diff";
+import { buildSkillDiffSnapshot, type SkillContentSnapshot, type SkillDiffSnapshot } from "../core/skill-diff";
 import { buildCombinedSupabaseSetupSql, supabaseSqlEditorUrl } from "../core/supabase-setup";
 import {
   listSkillUsageSources,
@@ -395,7 +393,7 @@ async function uploadLocalSkillToSupabase(skillPath: string, force = false): Pro
   }
 
   const existingBinding = store.getSkillSyncBindingForPortableIdentity(location.identity);
-  if (latest && !force && skillUploadRequiresConfirmation(latest.contentHash, existingBinding?.lastContentHash)) {
+  if (latest && !force && (!existingBinding?.lastContentHash || latest.contentHash !== existingBinding.lastContentHash)) {
     return {
       status: "needs-confirmation",
       conflict: {
@@ -408,7 +406,10 @@ async function uploadLocalSkillToSupabase(skillPath: string, force = false): Pro
     };
   }
 
-  const remoteSkill = await client.uploadSkillVersion(base, nextSkillVersionForFingerprint(remoteGroup, fingerprint));
+  const existingVersions = remoteGroup?.versions
+    .filter((version) => version.localFingerprint === fingerprint)
+    .map((version) => version.version) ?? [];
+  const remoteSkill = await client.uploadSkillVersion(base, Math.max(0, ...existingVersions) + 1);
   const newBinding = persistSkillSyncBinding(skill.path, location.identity, remoteSkill.id, remoteSkill.updatedAt, remoteSkill.version, contentHash, "upload");
   return { status: "uploaded", remoteSkill, binding: newBinding, version: remoteSkill.version };
 }
@@ -452,9 +453,12 @@ async function getSyncedSkillDiff(
 
   if (remoteSkillId) {
     const remoteSkill = await getRemoteSkillVersionDetail(remoteSkillId);
+    const files = skillSyncFilesFromMetadata(remoteSkill.metadata);
     remoteSnapshot = {
       contentHash: remoteSkill.contentHash,
-      files: filesWithSkillMarkdown(remoteSkill.markdown, skillSyncFilesFromMetadata(remoteSkill.metadata)),
+      files: files.some((file) => file.relativePath === "SKILL.md")
+        ? files
+        : [{ relativePath: "SKILL.md", contentBase64: Buffer.from(remoteSkill.markdown, "utf8").toString("base64") }, ...files],
     };
   }
 

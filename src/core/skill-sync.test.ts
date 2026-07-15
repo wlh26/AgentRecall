@@ -11,10 +11,8 @@ import {
   buildSkillSyncSetupSql,
   buildSkillVersionBasePayload,
   groupRemoteSkillVersions,
-  nextSkillVersionForFingerprint,
   skillSyncContentHash,
   skillSyncFingerprint,
-  skillUploadRequiresConfirmation,
   type RemoteSkill,
   type RemoteSkillVersion,
 } from "./skill-sync";
@@ -104,12 +102,6 @@ describe("skill sync", () => {
     expect(skillSyncFingerprint(localSkill({ directoryPath: "/tmp/.codex/skills/team/review-code" }))).not.toBe(expected);
   });
 
-  it("requires confirmation whenever an existing cloud head changed or has no binding", () => {
-    expect(skillUploadRequiresConfirmation("remote-v2", null)).toBe(true);
-    expect(skillUploadRequiresConfirmation("remote-v2", "remote-v1")).toBe(true);
-    expect(skillUploadRequiresConfirmation("remote-v1", "remote-v1")).toBe(false);
-  });
-
   it("computes a content hash that is stable for identical content and changes with content", () => {
     const files = [{ relativePath: "references/a.md", contentBase64: Buffer.from("a").toString("base64"), mode: 0o644 }];
     const base = skillSyncContentHash("# Body", files);
@@ -159,7 +151,7 @@ describe("skill sync", () => {
     expect(groups[0].fingerprint).toBe(canonical);
     expect(groups[0].fingerprints).toEqual(expect.arrayContaining(["legacy-name-fingerprint", canonical]));
     expect(groups[0].latest.id).toBe("new-v1");
-    expect(nextSkillVersionForFingerprint(groups[0], canonical)).toBe(2);
+    expect(groups[0].versions.filter((item) => item.localFingerprint === canonical).map((item) => item.version)).toEqual([1]);
   });
 
   it("reports missing-table status when Supabase has not been initialized", async () => {

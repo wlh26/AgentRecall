@@ -4,6 +4,12 @@
 
 - Before searching local files or text, check whether `rg` is available. Prefer `rg` and `rg --files` over `grep` or slower alternatives.
 
+## Code structure
+
+- Prefer changing the existing function or component directly when logic has only one caller.
+- Create a helper only when it is reused across independent call sites or isolates a meaningful domain, lifecycle, safety, concurrency, or resource-management boundary.
+- Do not add trivial pass-through wrappers, single-use aliases, or functions exported only to make an implementation detail directly testable. Test observable behavior through the owning function or component instead.
+
 ## Development branches and release notes
 
 - Every independent development branch must add exactly one user-facing release note before opening an MR.

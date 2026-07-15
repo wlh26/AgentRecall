@@ -263,4 +263,3 @@ Expected: all checks pass with no leftover Electron process or generated test fi
 git add .release-notes/stabilize-sync-experience.md
 git commit -m "docs: update unified sync release notes"
 ```
-

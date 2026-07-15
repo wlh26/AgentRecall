@@ -100,7 +100,7 @@ test("snoozes the terminal prompt for the same cached version", async () => {
 });
 
 test("skips the same update version until a newer version is released", async () => {
-  const cacheDirectory = await mkdtemp(path.join(tmpdir(), "agent-session-update-skip-version-"));
+  const cacheDirectory = await temporaryDirectory("agent-session-update-skip-version-");
   const cachePath = path.join(cacheDirectory, "update-check.json");
   const firstManifest = manifest("0.2.0");
   const nextManifest = manifest("0.3.0");
@@ -398,7 +398,7 @@ test("repairs an incomplete Electron runtime before reporting update success", a
 });
 
 test("validates Electron runtime with Node semantics when launched by Electron", async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), "agent-session-electron-node-mode-"));
+  const directory = await temporaryDirectory("agent-session-electron-node-mode-");
   const packagePath = path.join(directory, "agent-session-search");
   const electronPath = path.join(packagePath, "node_modules", "electron");
   const relativeExecutable = process.platform === "darwin"
@@ -448,7 +448,7 @@ test("validates Electron runtime with Node semantics when launched by Electron",
 });
 
 test("uses a stable Node executable for Electron runtime checks after npm replaces Electron", async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), "agent-session-electron-stable-node-"));
+  const directory = await temporaryDirectory("agent-session-electron-stable-node-");
   const packagePath = path.join(directory, "agent-session-search");
   const electronPath = path.join(packagePath, "node_modules", "electron");
   const relativeExecutable = process.platform === "darwin"
