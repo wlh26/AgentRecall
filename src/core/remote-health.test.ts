@@ -28,6 +28,12 @@ const session = {
   source: "codex-cli",
 } as SessionSearchResult;
 
+function decodePythonCommand(command: string): string {
+  const match = command.match(/base64\.b64decode\("([A-Za-z0-9+/=]+)"\)/);
+  if (!match?.[1]) throw new Error("Expected an encoded Python command");
+  return Buffer.from(match[1], "base64").toString("utf-8");
+}
+
 describe("remote health checks", () => {
   it("returns structured health checks for ssh connectivity, CLIs, and session directories", async () => {
     const report = await diagnoseRemoteEnvironment(environment, {
@@ -39,23 +45,38 @@ describe("remote health checks", () => {
           home: "/home/me",
           codexCli: "/usr/local/bin/codex",
           claudeCli: null,
+          tclaudeCli: "/usr/local/bin/tclaude",
+          tcodexCli: null,
+          codebuddyCli: "/usr/local/bin/codebuddy",
           codexSessionsExists: true,
           codexSessionsReadable: true,
           claudeProjectsExists: false,
           claudeProjectsReadable: false,
+          tclaudeProjectsExists: true,
+          tclaudeProjectsReadable: true,
+          tcodexSessionsExists: false,
+          tcodexSessionsReadable: false,
+          codebuddyProjectsExists: true,
+          codebuddyProjectsReadable: false,
         });
       },
     });
 
-    expect(report.ok).toBe(true);
+    expect(report.ok).toBe(false);
     expect(report.checks.map((check) => [check.id, check.status])).toEqual([
       ["connectivity", "ok"],
       ["codex-cli", "ok"],
       ["claude-cli", "warning"],
       ["codex-sessions", "ok"],
       ["claude-projects", "warning"],
+      ["tclaude-cli", "ok"],
+      ["tcodex-cli", "warning"],
+      ["codebuddy-cli", "ok"],
+      ["tclaude-projects", "ok"],
+      ["tcodex-sessions", "warning"],
+      ["codebuddy-projects", "error"],
     ]);
-    expect(report.summary).toContain("3/5");
+    expect(report.summary).toContain("6/11");
   });
 
   it("marks connectivity as failed when ssh command fails", async () => {
@@ -112,5 +133,26 @@ describe("remote health checks", () => {
 
     expect(report.ok).toBe(true);
     expect(report.checks.map((check) => check.status)).toEqual(["ok", "ok", "ok"]);
+  });
+
+  it.each([
+    ["tclaude-cli", "tclaude"],
+    ["tcodex-cli", "tcodex"],
+    ["codebuddy-cli", "codebuddy"],
+    ["codewiz-cli", "codewiz"],
+  ] as const)("preflights %s with %s", async (source, binary) => {
+    let script = "";
+    await preflightRemoteSessionResume(environment, { ...session, source } as SessionSearchResult, {
+      runSsh: async (_environment, command) => {
+        script = decodePythonCommand(command);
+        return JSON.stringify({
+          fileExists: true,
+          fileReadable: true,
+          projectExists: true,
+          cliPath: `/bin/${binary}`,
+        });
+      },
+    });
+    expect(script).toContain(`cli = "${binary}"`);
   });
 });

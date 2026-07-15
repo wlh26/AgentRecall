@@ -42,6 +42,12 @@ export async function diagnoseRemoteEnvironment(
       cliCheck("claude-cli", "Claude CLI", payload.claudeCli),
       directoryCheck("codex-sessions", "Codex sessions", payload.codexSessionsExists, payload.codexSessionsReadable),
       directoryCheck("claude-projects", "Claude projects", payload.claudeProjectsExists, payload.claudeProjectsReadable),
+      cliCheck("tclaude-cli", "TClaude CLI", payload.tclaudeCli),
+      cliCheck("tcodex-cli", "TCodex CLI", payload.tcodexCli),
+      cliCheck("codebuddy-cli", "CodeBuddy CLI", payload.codebuddyCli),
+      directoryCheck("tclaude-projects", "TClaude projects", payload.tclaudeProjectsExists, payload.tclaudeProjectsReadable),
+      directoryCheck("tcodex-sessions", "TCodex sessions", payload.tcodexSessionsExists, payload.tcodexSessionsReadable),
+      directoryCheck("codebuddy-projects", "CodeBuddy projects", payload.codebuddyProjectsExists, payload.codebuddyProjectsReadable),
     ];
     return buildReport(checks);
   } catch (error) {
@@ -65,7 +71,7 @@ export async function preflightRemoteSessionResume(
   try {
     const output = await runSsh(environment, buildRemoteResumePreflightCommand(session));
     const payload = parseResumePreflightPayload(output);
-    const cli = cliNameForSource(session.source);
+    const cli = resumeCliForSource(session.source);
     const checks: RemoteHealthCheck[] = [
       sessionFileCheck(payload.fileExists, payload.fileReadable),
       {
@@ -124,10 +130,12 @@ function buildReport(checks: RemoteHealthCheck[]): RemoteHealthReport {
   };
 }
 
-function cliNameForSource(source: SessionSource): "codex" | "claude" | "codebuddy" | "codewiz" {
-  if (source.startsWith("claude") || source === "tclaude-cli") return "claude";
+export function resumeCliForSource(source: SessionSource): "codex" | "claude" | "tclaude" | "tcodex" | "codebuddy" | "codewiz" {
+  if (source === "tclaude-cli") return "tclaude";
+  if (source === "tcodex-cli") return "tcodex";
   if (source === "codebuddy-cli") return "codebuddy";
   if (source === "codewiz-cli") return "codewiz";
+  if (source.startsWith("claude")) return "claude";
   return "codex";
 }
 
@@ -145,16 +153,28 @@ def readable(path):
 
 codex_sessions = home / ".codex" / "sessions"
 claude_projects = home / ".claude" / "projects"
+tclaude_projects = home / ".tclaude" / "projects"
+tcodex_sessions = home / ".tcodex" / "sessions"
+codebuddy_projects = home / ".codebuddy" / "projects"
 print(json.dumps({
   "ok": True,
   "home": str(home),
   "user": os.environ.get("USER") or os.environ.get("USERNAME") or "",
   "codexCli": shutil.which("codex"),
   "claudeCli": shutil.which("claude"),
+  "tclaudeCli": shutil.which("tclaude"),
+  "tcodexCli": shutil.which("tcodex"),
+  "codebuddyCli": shutil.which("codebuddy"),
   "codexSessionsExists": codex_sessions.exists(),
   "codexSessionsReadable": readable(codex_sessions),
   "claudeProjectsExists": claude_projects.exists(),
   "claudeProjectsReadable": readable(claude_projects),
+  "tclaudeProjectsExists": tclaude_projects.exists(),
+  "tclaudeProjectsReadable": readable(tclaude_projects),
+  "tcodexSessionsExists": tcodex_sessions.exists(),
+  "tcodexSessionsReadable": readable(tcodex_sessions),
+  "codebuddyProjectsExists": codebuddy_projects.exists(),
+  "codebuddyProjectsReadable": readable(codebuddy_projects),
 }, ensure_ascii=False))`;
   return buildPythonBase64Command(script);
 }
@@ -182,7 +202,7 @@ print(json.dumps({
 }, ensure_ascii=False))`
     .replace("__FILE_B64__", Buffer.from(session.filePath, "utf-8").toString("base64"))
     .replaceAll("__PROJECT_B64__", session.projectPath ? Buffer.from(session.projectPath, "utf-8").toString("base64") : "")
-    .replace("__CLI__", cliNameForSource(session.source));
+    .replace("__CLI__", resumeCliForSource(session.source));
   return buildPythonBase64Command(script);
 }
 

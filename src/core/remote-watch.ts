@@ -148,8 +148,12 @@ export function buildRemoteWatchSshArgs(environment: SessionEnvironment, remoteC
   return buildRemoteSyncSshArgs(environment, remoteCommand);
 }
 
+export function buildRemoteWatchCommand(): string {
+  return String.raw`sh -lc 'set --; for path in "$HOME/.codex/sessions" "$HOME/.codex/session_index.jsonl" "$HOME/.claude/projects" "$HOME/.claude/sessions" "$HOME/.tclaude/projects" "$HOME/.tcodex/sessions" "$HOME/.tcodex/session_index.jsonl" "$HOME/.codebuddy/projects"; do if [ -e "$path" ]; then set -- "$@" "$path"; fi; done; [ "$#" -gt 0 ] || exit 86; if command -v inotifywait >/dev/null 2>&1; then inotifywait -m -r -e create,modify,move,delete "$@" 2>/dev/null; elif command -v fswatch >/dev/null 2>&1; then fswatch -0 "$@"; else exit 86; fi'`;
+}
+
 function startSystemWatcher(environment: SessionEnvironment, onEvent: () => void, onUnavailable?: () => void): WatchHandle {
-  const remoteCommand = String.raw`sh -lc 'if command -v inotifywait >/dev/null 2>&1; then inotifywait -m -r -e create,modify,move,delete "$HOME/.codex/sessions" "$HOME/.codex/session_index.jsonl" "$HOME/.claude/projects" "$HOME/.claude/sessions" 2>/dev/null; elif command -v fswatch >/dev/null 2>&1; then fswatch -0 "$HOME/.codex" "$HOME/.claude"; else exit 86; fi'`;
+  const remoteCommand = buildRemoteWatchCommand();
   let reportedUnavailable = false;
   const reportUnavailable = (): void => {
     if (reportedUnavailable) return;

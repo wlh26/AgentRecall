@@ -1,5 +1,9 @@
 import { execFile, type ExecFileOptions } from "node:child_process";
-import { loadRemoteSessionPayloads, type RemoteSessionFilePayload } from "./remote-session-loader";
+import {
+  loadRemoteSessionPayloads,
+  type RemoteSessionFileKind,
+  type RemoteSessionFilePayload,
+} from "./remote-session-loader";
 import type { SessionStore } from "./session-store";
 import { buildSshArgs } from "./ssh-config";
 import type {
@@ -21,10 +25,12 @@ export interface RemoteSyncStatus {
 
 export interface RemoteSyncOptions {
   runSsh?: (environment: SessionEnvironment, remoteCommand: string) => Promise<string>;
+  enabledOptionalSources?: SessionSource[];
 }
 
 export interface RemoteSessionSummaryPayload {
-  kind: "codex-session" | "claude-project" | "codewiz-session";
+  kind: "codex-session" | "claude-project" | "codebuddy-project" | "codewiz-session";
+  source?: SessionSource;
   path: string;
   mtimeMs: number;
   size: number;
@@ -54,6 +60,7 @@ export const REMOTE_SYNC_EXEC_OPTIONS = {
 // pager enumerates, otherwise the detail view (which loads the tail window
 // `[messageCount - limit, messageCount)`) shows the wrong slice or hides the newest messages.
 const REMOTE_MESSAGE_PARSER_PY = String.raw`import re
+from datetime import datetime, timedelta, timezone
 
 def text_from_blocks(content):
   if isinstance(content, str):
@@ -66,7 +73,7 @@ def text_from_blocks(content):
       continue
     if block.get("type") in {"tool_use", "tool_result", "input_image"}:
       continue
-    text = block.get("text")
+    text = block.get("text") or block.get("input_text") or block.get("output_text")
     if isinstance(text, str) and text:
       parts.append(text)
   return "\n".join(parts)
@@ -91,6 +98,16 @@ def meaningful_user(text):
     return False
   return True
 
+def codebuddy_timestamp(value):
+  if isinstance(value, str):
+    return value
+  if isinstance(value, (int, float)) and not isinstance(value, bool):
+    try:
+      return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    except (OverflowError, OSError, ValueError):
+      return ""
+  return ""
+
 def parse_message(row, kind):
   if not isinstance(row, dict):
     return None
@@ -111,6 +128,16 @@ def parse_message(row, kind):
     if not text or (role == "user" and not meaningful_user(text)):
       return None
     return {"role": role, "content": text, "timestamp": row.get("timestamp") if isinstance(row.get("timestamp"), str) else ""}
+  if kind == "codebuddy":
+    if row.get("type") != "message" or row.get("role") not in {"user", "assistant"}:
+      return None
+    text = text_from_blocks(row.get("content"))
+    role = row.get("role")
+    if not text or (role == "user" and not meaningful_user(text)):
+      return None
+    if role == "user" and row.get("parentId") is None and text.strip() == "code":
+      return None
+    return {"role": role, "content": text, "timestamp": codebuddy_timestamp(row.get("timestamp"))}
   if row.get("type") not in {"user", "assistant"}:
     return None
   message = row.get("message")
@@ -145,16 +172,40 @@ def _tok_add(total, nxt):
   total["reasoningOutputTokens"] += nxt["reasoningOutputTokens"]
   total["totalTokens"] += nxt["totalTokens"]
 
+def _iso_timestamp_ms(value):
+  if not isinstance(value, str):
+    return None
+  match = re.match(r"^(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2}):(\d{2})(?:[.,](\d+))?(?:([Zz])|([+-])(\d{2}):?(\d{2}))?$", value.strip())
+  if not match:
+    return None
+  try:
+    fraction = match.group(7) or ""
+    microsecond = int((fraction + "000000")[:6])
+    if match.group(8) or not match.group(9):
+      tz = timezone.utc
+    else:
+      offset_hours = int(match.group(10))
+      offset_minutes = int(match.group(11))
+      if offset_hours > 23 or offset_minutes > 59:
+        return None
+      sign = 1 if match.group(9) == "+" else -1
+      tz = timezone(timedelta(minutes=sign * (offset_hours * 60 + offset_minutes)))
+    parsed = datetime(
+      int(match.group(1)), int(match.group(2)), int(match.group(3)),
+      int(match.group(4)), int(match.group(5)), int(match.group(6)),
+      microsecond=microsecond, tzinfo=tz,
+    )
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    delta = parsed.astimezone(timezone.utc) - epoch
+    return delta.days * 86400000 + delta.seconds * 1000 + delta.microseconds // 1000
+  except (OverflowError, TypeError, ValueError):
+    return None
+
 def _tok_timestamp(value):
   if isinstance(value, (int, float)) and not isinstance(value, bool):
     return int(value)
-  if isinstance(value, str):
-    try:
-      from datetime import datetime
-      return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1000)
-    except Exception:
-      return 0
-  return 0
+  parsed = _iso_timestamp_ms(value)
+  return parsed if parsed is not None else 0
 
 def _tok_event(timestamp, key, usage):
   event = dict(usage)
@@ -287,20 +338,29 @@ export async function syncRemoteEnvironment(
   const runSsh = options.runSsh ?? runSystemSsh;
   store.updateEnvironmentSyncState(environment.id, "syncing", { lastError: null });
   try {
-    const output = await runSsh(environment, REMOTE_COLLECTOR_COMMAND);
+    const enabledOptionalSources = new Set(options.enabledOptionalSources ?? []);
+    const output = await runSsh(environment, buildRemoteCollectorCommand([...enabledOptionalSources]));
     const { payloads, summaries } = decodeRemoteSyncOutput(output);
-    for (const summary of summaries) {
+    const enabledSummaries = summaries.filter(
+      (summary) => !isOptionalRemoteSource(summarySource(summary)) || enabledOptionalSources.has(summarySource(summary)),
+    );
+    for (const summary of enabledSummaries) {
+      const session = remoteSummaryToIndexedSession(environment, summary);
+      migrateLegacyRemoteSessionRecord(store, session);
       store.upsertIndexedSessionSummary(
-        remoteSummaryToIndexedSession(environment, summary),
+        session,
         summary.messageCount,
         summary.tokenEvents,
         summary.messageEvents,
       );
     }
     const loaded = loadRemoteSessionPayloads(environment, payloads);
-    for (const item of loaded) store.upsertIndexedSession(item.session, item.messages, item.tokenEvents, item.traceEvents);
+    for (const item of loaded) {
+      migrateLegacyRemoteSessionRecord(store, item.session);
+      store.upsertIndexedSession(item.session, item.messages, item.tokenEvents, item.traceEvents);
+    }
     store.updateEnvironmentSyncState(environment.id, "watching", { lastSyncedAt: Date.now(), lastError: null });
-    return { environmentId: environment.id, indexed: summaries.length + loaded.length, error: null };
+    return { environmentId: environment.id, indexed: enabledSummaries.length + loaded.length, error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     store.updateEnvironmentSyncState(environment.id, "error", { lastError: message });
@@ -308,11 +368,20 @@ export async function syncRemoteEnvironment(
   }
 }
 
+function migrateLegacyRemoteSessionRecord(store: SessionStore, session: IndexedSession): void {
+  const legacyFamily = session.source === "codex-cli" ? "codex" : session.source === "claude-cli" ? "claude" : null;
+  if (!legacyFamily || !session.environmentId) return;
+  store.migrateSessionKeyPreservingUserState(
+    `ssh:${session.environmentId}:${legacyFamily}:${session.rawId}`,
+    session.sessionKey,
+  );
+}
+
 function remoteSummaryToIndexedSession(environment: SessionEnvironment, summary: RemoteSessionSummaryPayload): IndexedSession {
-  const family = summary.kind === "codex-session" ? "codex" : summary.kind === "codewiz-session" ? "codewiz" : "claude";
-  const source: SessionSource = summary.kind === "codex-session" ? "codex-cli" : summary.kind === "codewiz-session" ? "codewiz-cli" : "claude-cli";
+  const source = summarySource(summary);
+  const keySource = source === "codewiz-cli" ? "codewiz" : source;
   return {
-    sessionKey: `ssh:${environment.id}:${family}:${summary.rawId}`,
+    sessionKey: `ssh:${environment.id}:${keySource}:${summary.rawId}`,
     rawId: summary.rawId,
     source,
     projectPath: summary.projectPath,
@@ -330,6 +399,18 @@ function remoteSummaryToIndexedSession(environment: SessionEnvironment, summary:
     environmentKind: environment.kind,
     environmentLabel: environment.label,
   };
+}
+
+function summarySource(summary: RemoteSessionSummaryPayload): SessionSource {
+  if (summary.source) return summary.source;
+  if (summary.kind === "codex-session") return "codex-cli";
+  if (summary.kind === "codebuddy-project") return "codebuddy-cli";
+  if (summary.kind === "codewiz-session") return "codewiz-cli";
+  return "claude-cli";
+}
+
+function isOptionalRemoteSource(source: SessionSource): boolean {
+  return source === "tclaude-cli" || source === "tcodex-cli" || source === "codebuddy-cli";
 }
 
 export function encodeRemotePayloadForTest(payloads: RemoteSessionFilePayload[]): string {
@@ -353,6 +434,7 @@ function decodeRemoteSyncOutput(output: string): { payloads: RemoteSessionFilePa
     if ("contentBase64" in parsed) {
       payloads.push({
         kind: parsed.kind,
+        source: parsed.source,
         path: parsed.path,
         mtimeMs: parsed.mtimeMs,
         size: parsed.size,
@@ -398,12 +480,10 @@ export async function fetchRemoteSessionFilePayload(
   options: RemoteSessionFileFetchOptions = {},
 ): Promise<RemoteSessionFilePayload> {
   const runSsh = options.runSsh ?? runSystemSsh;
-  const output = await runSsh(environment, buildRemoteFileFetchCommand(session.filePath));
+  const kind = remoteKindForSource(session.source);
+  const output = await runSsh(environment, buildRemoteFileFetchCommand({ path: session.filePath, source: session.source, kind }));
   const payloads = decodeRemotePayload(output);
-  const expectedKind = session.source === "codewiz-cli"
-    ? "codewiz-session"
-    : session.source === "codex-cli" || session.source === "codex-app" || session.source === "codex-internal" ? "codex-session" : "claude-project";
-  const payload = payloads.find((item) => item.path === session.filePath && item.kind === expectedKind) ?? payloads[0];
+  const payload = payloads.find((item) => item.path === session.filePath && item.kind === kind) ?? payloads[0];
   if (!payload) throw new Error("Remote session file fetch returned no payload.");
   return payload;
 }
@@ -420,22 +500,40 @@ export async function fetchRemoteSessionMessagePage(
   return decodeRemoteMessagePage(output);
 }
 
-function buildRemoteFileFetchCommand(filePath: string): string {
+export function remoteFamilyForSource(source: SessionSource): "claude" | "codex" | "codebuddy" | "codewiz" {
+  if (source === "codewiz-cli") return "codewiz";
+  if (source === "codebuddy-cli") return "codebuddy";
+  if (source === "claude-cli" || source === "claude-app" || source === "claude-internal" || source === "tclaude-cli") {
+    return "claude";
+  }
+  return "codex";
+}
+
+function remoteKindForSource(source: SessionSource): RemoteSessionFileKind {
+  const family = remoteFamilyForSource(source);
+  if (family === "codewiz") return "codewiz-session";
+  if (family === "claude") return "claude-project";
+  if (family === "codebuddy") return "codebuddy-project";
+  return "codex-session";
+}
+
+function buildRemoteFileFetchCommand(request: { path: string; source: SessionSource; kind: RemoteSessionFileKind }): string {
+  const requestBase64 = Buffer.from(JSON.stringify(request), "utf-8").toString("base64");
   const script = String.raw`import base64, json
 from pathlib import Path
 
-path = Path(base64.b64decode("__PATH_B64__").decode("utf-8"))
+request = json.loads(base64.b64decode("__REQUEST_B64__").decode("utf-8"))
+path = Path(request["path"])
 stat = path.stat()
 content = path.read_bytes()
-suffix = path.suffix.lower()
-kind = "claude-project" if ".claude/projects" in str(path) or suffix == ".json" else "codex-session"
 print(json.dumps({
-  "kind": kind,
+  "kind": request["kind"],
+  "source": request["source"],
   "path": str(path),
   "mtimeMs": int(stat.st_mtime * 1000),
   "size": stat.st_size,
   "contentBase64": base64.b64encode(content).decode("ascii"),
-}, ensure_ascii=False))`.replace("__PATH_B64__", Buffer.from(filePath, "utf-8").toString("base64"));
+}, ensure_ascii=False))`.replace("__REQUEST_B64__", requestBase64);
   return buildPythonBase64Command(script);
 }
 
@@ -444,7 +542,7 @@ function buildRemoteMessagePageCommand(session: SessionSearchResult, offset: num
   const request = {
     path: dbPath,
     codeWizSessionId,
-    kind: session.source === "codewiz-cli" ? "codewiz" : session.source.startsWith("claude") ? "claude" : "codex",
+    kind: remoteFamilyForSource(session.source),
     offset: Math.max(0, Math.floor(offset)),
     limit: Math.max(0, Math.min(500, Math.floor(limit))),
   };
@@ -570,7 +668,7 @@ export function formatRemoteSyncProcessError(error: unknown, stdout: string, std
 }
 
 function looksLikeRemotePayload(output: string): boolean {
-  return /^\s*\{"kind":\s*"(?:codex-session|codex-index|claude-project|claude-session-index|codewiz-session)"/.test(output);
+  return /^\s*\{"kind":\s*"(?:codex-session|codex-index|claude-project|claude-session-index|codebuddy-project|codewiz-session)"/.test(output);
 }
 
 function truncateRemoteError(value: string, maxChars = 1200): string {
@@ -593,6 +691,20 @@ const REMOTE_SESSION_FILE_KINDS = new Set<RemoteSessionFilePayload["kind"]>([
   "claude-project",
   "claude-session-index",
   "codewiz-session",
+  "codebuddy-project",
+]);
+
+const REMOTE_SUMMARY_SOURCES = new Set<SessionSource>([
+  "claude-cli",
+  "claude-app",
+  "claude-internal",
+  "codex-cli",
+  "codex-app",
+  "codex-internal",
+  "tclaude-cli",
+  "tcodex-cli",
+  "codebuddy-cli",
+  "codewiz-cli",
 ]);
 
 const REMOTE_SYNC_SSH_OPTIONS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"];
@@ -625,6 +737,7 @@ function parseRemotePayloadLine(line: string, lineNumber: number): RemoteSyncWir
 
   return {
     kind: kind as RemoteSessionFilePayload["kind"],
+    source: remoteSourceField(parsed, lineNumber),
     path: parsed.path,
     mtimeMs: parsed.mtimeMs,
     size: parsed.size,
@@ -637,7 +750,7 @@ function parseRemoteSummaryRecord(
   lineNumber: number,
   kind: RemoteSessionSummaryPayload["kind"],
 ): RemoteSessionSummaryPayload {
-  if (kind !== "codex-session" && kind !== "claude-project" && kind !== "codewiz-session") {
+  if (kind !== "codex-session" && kind !== "claude-project" && kind !== "codebuddy-project" && kind !== "codewiz-session") {
     throw new Error(`Invalid remote payload at line ${lineNumber}: summaries must be session files`);
   }
   const rawId = stringField(parsed, "rawId");
@@ -651,6 +764,7 @@ function parseRemoteSummaryRecord(
   if (!Number.isFinite(messageCount) || messageCount < 0) throw new Error(`Invalid remote payload at line ${lineNumber}: invalid messageCount`);
   return {
     kind,
+    source: remoteSourceField(parsed, lineNumber),
     path: stringField(parsed, "path"),
     mtimeMs: numberField(parsed, "mtimeMs"),
     size: numberField(parsed, "size"),
@@ -665,6 +779,14 @@ function parseRemoteSummaryRecord(
     tokenEvents: tokenEventsField(parsed, "tokenEvents", lineNumber),
     messageEvents: messageEventsField(parsed, "messageEvents", lineNumber),
   };
+}
+
+function remoteSourceField(value: Record<string, unknown>, lineNumber: number): SessionSource | undefined {
+  if (value.source === undefined) return undefined;
+  if (typeof value.source !== "string" || !REMOTE_SUMMARY_SOURCES.has(value.source as SessionSource)) {
+    throw new Error(`Invalid remote payload at line ${lineNumber}: invalid source`);
+  }
+  return value.source as SessionSource;
 }
 
 function messageEventsField(value: Record<string, unknown>, key: string, lineNumber: number): SessionMessageEvent[] | undefined {
@@ -760,6 +882,7 @@ import sqlite3
 from pathlib import Path
 
 MAX_SESSION_FILES = 2500
+enabled_optional_sources = set(__ENABLED_OPTIONAL_SOURCES__)
 
 home = Path.home()
 
@@ -771,9 +894,9 @@ def title_from(text):
   lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
   return (lines[0] if lines else text.strip())[:120]
 
-def load_codex_titles():
+def load_codex_titles(config_dir):
   titles = {}
-  index_path = home / ".codex" / "session_index.jsonl"
+  index_path = home / config_dir / "session_index.jsonl"
   try:
     with index_path.open("r", encoding="utf-8", errors="replace") as handle:
       for line in handle:
@@ -792,9 +915,9 @@ def load_codex_titles():
     pass
   return titles
 
-def load_claude_index():
+def load_claude_index(config_dir):
   index = {}
-  root = home / ".claude" / "sessions"
+  root = home / config_dir / "sessions"
   if not root.exists():
     return index
   for path in root.glob("*.json"):
@@ -815,7 +938,7 @@ def load_claude_index():
 def emit(record):
   print(json.dumps(record, ensure_ascii=False))
 
-def emit_codex_summary(path, stat, titles):
+def emit_codex_summary(path, stat, titles, source):
   raw_id = path.stem
   project_path = ""
   timestamp = int(stat.st_mtime * 1000)
@@ -841,12 +964,9 @@ def emit_codex_summary(path, stat, titles):
             git = payload.get("git")
             if isinstance(git, dict) and isinstance(git.get("branch"), str):
               git_branch = git.get("branch")
-          if isinstance(row.get("timestamp"), str):
-            try:
-              from datetime import datetime
-              timestamp = int(datetime.fromisoformat(row["timestamp"].replace("Z", "+00:00")).timestamp() * 1000)
-            except Exception:
-              pass
+          parsed_timestamp = _iso_timestamp_ms(row.get("timestamp"))
+          if parsed_timestamp is not None:
+            timestamp = parsed_timestamp
           continue
         accumulate_codex_tokens(token_state, row)
         parsed = parse_message(row, "codex")
@@ -860,6 +980,7 @@ def emit_codex_summary(path, stat, titles):
   indexed_title = titles.get(raw_id, ("", ""))[0]
   emit({
     "kind": "codex-session",
+    "source": source,
     "path": str(path),
     "mtimeMs": int(stat.st_mtime * 1000),
     "size": stat.st_size,
@@ -875,7 +996,7 @@ def emit_codex_summary(path, stat, titles):
     "tokenEvents": finalize_codex_events(token_state),
   })
 
-def emit_claude_summary(path, stat, index):
+def emit_claude_summary(path, stat, index, source):
   raw_id = path.stem
   meta = index.get(raw_id, {})
   project_path = meta.get("cwd", "")
@@ -909,6 +1030,7 @@ def emit_claude_summary(path, stat, index):
     return
   emit({
     "kind": "claude-project",
+    "source": source,
     "path": str(path),
     "mtimeMs": int(stat.st_mtime * 1000),
     "size": stat.st_size,
@@ -1047,41 +1169,156 @@ def emit_codewiz_summaries(db_path, stat):
       db.close()
     except Exception:
       pass
+def _codebuddy_detail(value, key):
+  if isinstance(value, list) and value:
+    value = value[0]
+  return _tok_num(value.get(key)) if isinstance(value, dict) else 0
 
+def _codebuddy_usage(provider_data):
+  usage = provider_data.get("usage")
+  if isinstance(usage, dict):
+    total_input = _tok_num(usage.get("inputTokens"))
+    total_output = _tok_num(usage.get("outputTokens"))
+    cached = _codebuddy_detail(usage.get("inputTokensDetails"), "cached_tokens")
+    reasoning = _codebuddy_detail(usage.get("outputTokensDetails"), "reasoning_tokens")
+  else:
+    total_input = total_output = cached = reasoning = 0
+  raw_usage = provider_data.get("rawUsage")
+  if total_input == 0 and total_output == 0 and isinstance(raw_usage, dict):
+    total_input = _tok_num(raw_usage.get("prompt_tokens"))
+    total_output = _tok_num(raw_usage.get("completion_tokens"))
+    cached = _codebuddy_detail(raw_usage.get("prompt_tokens_details"), "cached_tokens")
+    reasoning = _codebuddy_detail(raw_usage.get("completion_tokens_details"), "reasoning_tokens")
+  if total_input == 0 and total_output == 0:
+    return None
+  return _tok_create(max(0, total_input - cached), max(0, total_output - reasoning), cached, reasoning)
+
+def emit_codebuddy_summary(path, stat):
+  raw_id = path.stem
+  project_path = ""
+  timestamp = int(stat.st_mtime * 1000)
+  original_title = ""
+  first_question = ""
+  message_count = 0
+  message_events = []
+  token_entries = {}
+  try:
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+      for index, line in enumerate(handle):
+        try:
+          row = json.loads(line)
+        except Exception:
+          continue
+        if not isinstance(row, dict):
+          continue
+        if isinstance(row.get("sessionId"), str) and row.get("sessionId") and raw_id == path.stem:
+          raw_id = row.get("sessionId")
+        if not project_path and isinstance(row.get("cwd"), str):
+          project_path = row.get("cwd")
+        row_timestamp = _tok_timestamp(row.get("timestamp"))
+        if row_timestamp and timestamp == int(stat.st_mtime * 1000):
+          timestamp = row_timestamp
+        if row.get("type") == "ai-title" and isinstance(row.get("aiTitle"), str) and row.get("aiTitle").strip() and not original_title:
+          original_title = row.get("aiTitle").strip()
+        if row.get("type") == "message" and row.get("role") == "assistant":
+          provider_data = row.get("providerData")
+          usage = _codebuddy_usage(provider_data) if isinstance(provider_data, dict) else None
+          if usage:
+            key_value = provider_data.get("messageId") or row.get("id") or "%s:%s:%s" % (index, usage["inputTokens"], usage["outputTokens"])
+            key = str(key_value)
+            if not key.startswith("codebuddy:"):
+              key = "codebuddy:" + key
+            _tok_put(token_entries, key, _tok_event(row_timestamp, key, usage))
+        parsed = parse_message(row, "codebuddy")
+        if parsed:
+          message_events.append({"index": message_count, "timestamp": _tok_timestamp(parsed["timestamp"])})
+          message_count += 1
+          if parsed["role"] == "user" and not first_question:
+            first_question = parsed["content"]
+  except Exception:
+    return
+  token_events = list(token_entries.values())
+  emit({
+    "kind": "codebuddy-project",
+    "source": "codebuddy-cli",
+    "path": str(path),
+    "mtimeMs": int(stat.st_mtime * 1000),
+    "size": stat.st_size,
+    "rawId": raw_id,
+    "projectPath": project_path,
+    "timestamp": timestamp,
+    "originalTitle": original_title or title_from(first_question) or raw_id,
+    "firstQuestion": first_question,
+    "messageCount": message_count,
+    "messageEvents": message_events,
+    "gitBranch": "",
+    "tokenUsage": _tok_total(token_events),
+    "tokenEvents": token_events,
+  })
 candidates = []
-for kind, root, pattern in [
-  ("codex-session", home / ".codex" / "sessions", "*.jsonl"),
-  ("claude-project", home / ".claude" / "projects", "*.jsonl"),
-]:
+sources = [
+  ("codex-session", "codex-cli", home / ".codex" / "sessions", "*.jsonl"),
+  ("claude-project", "claude-cli", home / ".claude" / "projects", "*.jsonl"),
+]
+optional_sources = [__OPTIONAL_SOURCE_DESCRIPTORS__]
+sources.extend(item for item in optional_sources if item[1] in enabled_optional_sources)
+for kind, source, root, pattern in sources:
   if not root.exists():
     continue
   paths = root.rglob(pattern) if root.is_dir() else []
   for path in paths:
     try:
       stat = path.stat()
-      candidates.append((stat.st_mtime, kind, path, stat.st_size))
+      candidates.append((stat.st_mtime, kind, source, path, stat.st_size))
     except Exception:
       pass
 
-codex_titles = load_codex_titles()
-claude_index = load_claude_index()
 codewiz_db = home / ".local" / "share" / "codewiz" / "opencode.db"
 try:
   if codewiz_db.exists():
     emit_codewiz_summaries(codewiz_db, codewiz_db.stat())
 except Exception:
   pass
-for _mtime, kind, path, _size in sorted(candidates, key=lambda item: item[0], reverse=True)[:MAX_SESSION_FILES]:
+codex_titles = {
+  "codex-cli": load_codex_titles(".codex"),
+  __OPTIONAL_CODEX_TITLE_INDEXES__
+}
+claude_indexes = {
+  "claude-cli": load_claude_index(".claude"),
+  __OPTIONAL_CLAUDE_INDEXES__
+}
+for _mtime, kind, source, path, _size in sorted(candidates, key=lambda item: item[0], reverse=True)[:MAX_SESSION_FILES]:
   try:
     stat = path.stat()
     if kind == "codex-session":
-      emit_codex_summary(path, stat, codex_titles)
+      emit_codex_summary(path, stat, codex_titles.get(source, {}), source)
+    elif kind == "claude-project":
+      emit_claude_summary(path, stat, claude_indexes.get(source, {}), source)
     else:
-      emit_claude_summary(path, stat, claude_index)
+      emit_codebuddy_summary(path, stat)
   except Exception:
     pass`;
 
-const REMOTE_COLLECTOR_COMMAND = buildPythonBase64Command(REMOTE_COLLECTOR_SCRIPT);
+function buildRemoteCollectorCommand(enabledOptionalSources: SessionSource[]): string {
+  const descriptors: Record<string, string> = {
+    "tclaude-cli": '("claude-project", "tclaude-cli", home / ".tclaude" / "projects", "*.jsonl")',
+    "tcodex-cli": '("codex-session", "tcodex-cli", home / ".tcodex" / "sessions", "*.jsonl")',
+    "codebuddy-cli": '("codebuddy-project", "codebuddy-cli", home / ".codebuddy" / "projects", "*.jsonl")',
+  };
+  const optionalSources = enabledOptionalSources.filter((source) => source in descriptors);
+  const optionalCodexTitleIndexes = optionalSources.includes("tcodex-cli")
+    ? '"tcodex-cli": load_codex_titles(".tcodex"),'
+    : "";
+  const optionalClaudeIndexes = optionalSources.includes("tclaude-cli")
+    ? '"tclaude-cli": load_claude_index(".tclaude"),'
+    : "";
+  const script = REMOTE_COLLECTOR_SCRIPT
+    .replace("__ENABLED_OPTIONAL_SOURCES__", JSON.stringify(optionalSources))
+    .replace("__OPTIONAL_SOURCE_DESCRIPTORS__", optionalSources.map((source) => descriptors[source]).join(",\n  "))
+    .replace("__OPTIONAL_CODEX_TITLE_INDEXES__", optionalCodexTitleIndexes)
+    .replace("__OPTIONAL_CLAUDE_INDEXES__", optionalClaudeIndexes);
+  return buildPythonBase64Command(script);
+}
 
 function buildPythonBase64Command(script: string): string {
   const encoded = Buffer.from(script, "utf-8").toString("base64");

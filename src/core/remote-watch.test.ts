@@ -1,4 +1,8 @@
 import { EventEmitter } from "node:events";
+import { spawnSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import * as remoteWatch from "./remote-watch";
 import type { SessionEnvironment } from "./types";
@@ -8,7 +12,10 @@ const childProcessMocks = vi.hoisted(() => ({
   spawn: vi.fn(),
 }));
 
-vi.mock("node:child_process", () => childProcessMocks);
+vi.mock("node:child_process", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:child_process")>()),
+  ...childProcessMocks,
+}));
 
 const { RemoteWatchManager } = remoteWatch;
 
@@ -64,6 +71,78 @@ function createSpawnedChild() {
 }
 
 describe("RemoteWatchManager", () => {
+  it("builds a watcher command that filters all candidate session paths by existence", () => {
+    const maybeBuild = remoteWatch["buildRemoteWatchCommand" as keyof typeof remoteWatch];
+    expect(maybeBuild).toBeTypeOf("function");
+    if (typeof maybeBuild !== "function") return;
+
+    const command = (maybeBuild as () => string)();
+
+    expect(command).toContain("$HOME/.tclaude/projects");
+    expect(command).toContain("$HOME/.tcodex/sessions");
+    expect(command).toContain("$HOME/.tcodex/session_index.jsonl");
+    expect(command).toContain("$HOME/.codebuddy/projects");
+    expect(command).toContain('[ -e "$path" ]');
+    expect(command).toContain('inotifywait -m -r -e create,modify,move,delete "$@"');
+    expect(command).toContain('fswatch -0 "$@"');
+    expect(command).toContain("exit 86");
+  });
+
+  it("passes only existing candidate paths to inotifywait", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "remote-watch-home-"));
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), "remote-watch-bin-"));
+    const argsFile = path.join(bin, "watch-args");
+    try {
+      fs.symlinkSync("/bin/sh", path.join(bin, "sh"));
+      fs.writeFileSync(path.join(bin, "inotifywait"), '#!/bin/sh\nprintf "%s\\n" "$@" > "$WATCH_ARGS"\n');
+      fs.chmodSync(path.join(bin, "inotifywait"), 0o755);
+      fs.mkdirSync(path.join(home, ".codex", "sessions"), { recursive: true });
+      fs.mkdirSync(path.join(home, ".tclaude", "projects"), { recursive: true });
+
+      const result = spawnSync("/bin/sh", ["-c", remoteWatch.buildRemoteWatchCommand()], {
+        env: { HOME: home, PATH: bin, WATCH_ARGS: argsFile },
+        encoding: "utf8",
+      });
+
+      expect(result.status).toBe(0);
+      expect(fs.readFileSync(argsFile, "utf8").trim().split("\n")).toEqual([
+        "-m",
+        "-r",
+        "-e",
+        "create,modify,move,delete",
+        path.join(home, ".codex", "sessions"),
+        path.join(home, ".tclaude", "projects"),
+      ]);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
+  it("exits 86 when no watcher tool or no candidate path is available", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "remote-watch-home-"));
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), "remote-watch-bin-"));
+    try {
+      fs.symlinkSync("/bin/sh", path.join(bin, "sh"));
+      fs.mkdirSync(path.join(home, ".codex", "sessions"), { recursive: true });
+      const noTool = spawnSync("/bin/sh", ["-c", remoteWatch.buildRemoteWatchCommand()], {
+        env: { HOME: home, PATH: bin },
+      });
+      expect(noTool.status).toBe(86);
+
+      fs.writeFileSync(path.join(bin, "inotifywait"), "#!/bin/sh\nexit 0\n");
+      fs.chmodSync(path.join(bin, "inotifywait"), 0o755);
+      fs.rmSync(path.join(home, ".codex"), { recursive: true, force: true });
+      const noPath = spawnSync("/bin/sh", ["-c", remoteWatch.buildRemoteWatchCommand()], {
+        env: { HOME: home, PATH: bin },
+      });
+      expect(noPath.status).toBe(86);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
   it("debounces watcher events into a sync call", async () => {
     await withFakeTimers(async () => {
       const sync = vi.fn(async (_environment: SessionEnvironment) => undefined);

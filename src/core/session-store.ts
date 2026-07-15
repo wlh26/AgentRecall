@@ -561,6 +561,153 @@ export class SessionStore {
     return deleted;
   }
 
+  migrateSessionKeyPreservingUserState(legacyKey: string, targetKey: string): boolean {
+    if (!legacyKey || !targetKey || legacyKey === targetKey) return false;
+    let migrated = false;
+    this.transaction(() => {
+      const legacy = this.db
+        .prepare(
+          `SELECT custom_title, favorited, pinned, hidden, last_opened_at, last_resumed_at,
+             ai_summary, ai_summary_model, ai_summary_at, ai_summary_basis
+           FROM sessions WHERE session_key = ?`,
+        )
+        .get(legacyKey) as
+        | Pick<
+          SessionRow,
+          | "custom_title"
+          | "favorited"
+          | "pinned"
+          | "hidden"
+          | "last_opened_at"
+          | "last_resumed_at"
+          | "ai_summary"
+          | "ai_summary_model"
+          | "ai_summary_at"
+          | "ai_summary_basis"
+        >
+        | undefined;
+      if (!legacy) return;
+
+      const targetExists = Boolean(this.db.prepare("SELECT 1 FROM sessions WHERE session_key = ?").get(targetKey));
+      if (!targetExists) {
+        // These foreign keys are immediate by default. Deferring them for this transaction lets
+        // the parent key and every dependent row move together without an observable half-state.
+        this.db.exec("PRAGMA defer_foreign_keys = ON");
+        this.db.prepare("UPDATE sessions SET session_key = ? WHERE session_key = ?").run(targetKey, legacyKey);
+        for (const table of ["messages", "message_events", "token_events", "trace_events", "session_tags"]) {
+          this.db.prepare(`UPDATE ${table} SET session_key = ? WHERE session_key = ?`).run(targetKey, legacyKey);
+        }
+      } else {
+        // The source-level target is authoritative when both records exist. Fill nullable user
+        // state, OR booleans because false may only be the schema default, retain the newest
+        // activity timestamps, and union tags without losing legacy-only user state.
+        this.db
+          .prepare(
+            `UPDATE sessions SET
+               custom_title = COALESCE(custom_title, ?),
+               favorited = CASE WHEN favorited = 1 OR ? = 1 THEN 1 ELSE 0 END,
+               pinned = CASE WHEN pinned = 1 OR ? = 1 THEN 1 ELSE 0 END,
+               hidden = CASE WHEN hidden = 1 OR ? = 1 THEN 1 ELSE 0 END,
+               last_opened_at = CASE
+                 WHEN ? IS NULL THEN last_opened_at
+                 WHEN last_opened_at IS NULL OR last_opened_at < ? THEN ?
+                 ELSE last_opened_at
+               END,
+               last_resumed_at = CASE
+                 WHEN ? IS NULL THEN last_resumed_at
+                 WHEN last_resumed_at IS NULL OR last_resumed_at < ? THEN ?
+                 ELSE last_resumed_at
+               END,
+               ai_summary_model = CASE WHEN ai_summary IS NULL THEN ? ELSE ai_summary_model END,
+               ai_summary_at = CASE WHEN ai_summary IS NULL THEN ? ELSE ai_summary_at END,
+               ai_summary_basis = CASE WHEN ai_summary IS NULL THEN ? ELSE ai_summary_basis END,
+               ai_summary = COALESCE(ai_summary, ?)
+             WHERE session_key = ?`,
+          )
+          .run(
+            legacy.custom_title,
+            legacy.favorited,
+            legacy.pinned,
+            legacy.hidden,
+            legacy.last_opened_at,
+            legacy.last_opened_at,
+            legacy.last_opened_at,
+            legacy.last_resumed_at,
+            legacy.last_resumed_at,
+            legacy.last_resumed_at,
+            legacy.ai_summary_model,
+            legacy.ai_summary_at,
+            legacy.ai_summary_basis,
+            legacy.ai_summary,
+            targetKey,
+          );
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO session_tags (session_key, tag_id)
+             SELECT ?, tag_id FROM session_tags WHERE session_key = ?`,
+          )
+          .run(targetKey, legacyKey);
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO messages (session_key, message_index, role, content, timestamp)
+             SELECT ?, message_index, role, content, timestamp FROM messages WHERE session_key = ?`,
+          )
+          .run(targetKey, legacyKey);
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO message_events (session_key, message_index, timestamp)
+             SELECT ?, message_index, timestamp FROM message_events WHERE session_key = ?`,
+          )
+          .run(targetKey, legacyKey);
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO token_events (
+               session_key, dedupe_key, timestamp, input_tokens, output_tokens,
+               cached_input_tokens, reasoning_output_tokens, total_tokens
+             )
+             SELECT ?, dedupe_key, timestamp, input_tokens, output_tokens,
+               cached_input_tokens, reasoning_output_tokens, total_tokens
+             FROM token_events WHERE session_key = ?`,
+          )
+          .run(targetKey, legacyKey);
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO trace_events (
+               session_key, trace_index, kind, source, title, detail,
+               timestamp, call_id, event_type, status
+             )
+             SELECT ?, trace_index, kind, source, title, detail,
+               timestamp, call_id, event_type, status
+             FROM trace_events WHERE session_key = ?`,
+          )
+          .run(targetKey, legacyKey);
+        this.db
+          .prepare(
+            `UPDATE sessions SET
+               message_count = (SELECT COUNT(*) FROM messages WHERE session_key = ?),
+               input_tokens = (SELECT COALESCE(SUM(input_tokens), 0) FROM token_events WHERE session_key = ?),
+               output_tokens = (SELECT COALESCE(SUM(output_tokens), 0) FROM token_events WHERE session_key = ?),
+               cached_input_tokens = (SELECT COALESCE(SUM(cached_input_tokens), 0) FROM token_events WHERE session_key = ?),
+               reasoning_output_tokens = (SELECT COALESCE(SUM(reasoning_output_tokens), 0) FROM token_events WHERE session_key = ?),
+               total_tokens = (SELECT COALESCE(SUM(total_tokens), 0) FROM token_events WHERE session_key = ?)
+             WHERE session_key = ?`,
+          )
+          .run(targetKey, targetKey, targetKey, targetKey, targetKey, targetKey, targetKey);
+        this.db.prepare("DELETE FROM sessions WHERE session_key = ?").run(legacyKey);
+      }
+
+      // Migration ids are globally unique while source_session_key is only indexed, so every
+      // historical row can move intact without collapsing duplicate migration attempts.
+      this.db
+        .prepare("UPDATE session_migrations SET source_session_key = ? WHERE source_session_key = ?")
+        .run(targetKey, legacyKey);
+      this.db.prepare("DELETE FROM session_fts WHERE session_key IN (?, ?)").run(legacyKey, targetKey);
+      this.refreshFtsForSession(targetKey);
+      migrated = true;
+    });
+    return migrated;
+  }
+
   listSessionKeysByFilePath(environmentId: string, filePaths: ReadonlySet<string>): string[] {
     const rows = this.db
       .prepare("SELECT session_key, file_path FROM sessions WHERE environment_id = ? AND file_path != ''")
