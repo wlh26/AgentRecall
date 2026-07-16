@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { inflateRawSync } from "node:zlib";
 import { describe, expect, it, vi } from "vitest";
 import { createInMemoryStore } from "./session-store";
 import {
@@ -18,7 +19,7 @@ import type { RemoteSessionFilePayload } from "./remote-session-loader";
 import type { SessionSearchResult } from "./types";
 
 function decodeCollectorScript(command: string): string {
-  return Buffer.from(command.match(/b64decode\("([^"]+)"\)/)?.[1] ?? "", "base64").toString("utf-8");
+  return inflateRawSync(Buffer.from(command.match(/b64decode\("([^"]+)"\)/)?.[1] ?? "", "base64")).toString("utf-8");
 }
 
 async function executeDecodedPython(_environment: unknown, remoteCommand: string): Promise<string> {
@@ -728,7 +729,7 @@ describe("remote sync", () => {
         return "";
       },
     });
-    const collectorScript = Buffer.from(collectorCommand.match(/b64decode\("([^"]+)"\)/)?.[1] ?? "", "base64").toString("utf-8");
+    const collectorScript = decodeCollectorScript(collectorCommand);
     expect(collectorScript).toContain("total_token_usage");
     expect(collectorScript).toContain('"tokenUsage"');
   });
@@ -878,7 +879,7 @@ db.close()
           return "";
         },
       });
-      const collectorScript = Buffer.from(collectorCommand.match(/b64decode\("([^"]+)"\)/)?.[1] ?? "", "base64").toString("utf-8");
+      const collectorScript = decodeCollectorScript(collectorCommand);
       const output = execFileSync("python3", ["-c", collectorScript], {
         encoding: "utf8",
         env: { ...process.env, HOME: tempHome },
@@ -1134,8 +1135,7 @@ db.close()
       },
     });
 
-    const encodedScript = capturedCommand.match(/b64decode\("([^"]+)"\)/)?.[1] ?? "";
-    const script = Buffer.from(encodedScript, "base64").toString("utf-8");
+    const script = decodeCollectorScript(capturedCommand);
     expect(script).toContain("emit_codex_summary");
     expect(script).toContain("emit_claude_summary");
     expect(script).toContain("sorted(candidates");
@@ -1169,10 +1169,8 @@ db.close()
       },
     );
 
-    const decodeScript = (command: string): string =>
-      Buffer.from(command.match(/b64decode\("([^"]+)"\)/)?.[1] ?? "", "base64").toString("utf-8");
-    const collectorScript = decodeScript(collectorCommand);
-    const pageScript = decodeScript(pageCommand);
+    const collectorScript = decodeCollectorScript(collectorCommand);
+    const pageScript = decodeCollectorScript(pageCommand);
 
     for (const script of [collectorScript, pageScript]) {
       expect(script).toContain("def parse_message(row, kind):");
