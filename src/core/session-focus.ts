@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { sourceFamily } from "./platform";
+import { normalizeTerminalTitle } from "./terminal-title";
 import type { LiveSession, SessionSearchResult } from "./types";
 
 type CommandRunner = (command: string, args: string[]) => Promise<string>;
@@ -50,6 +51,38 @@ export async function focusLiveSessionTerminal(pid: number, options: FocusLiveSe
   }
 
   await runner("/usr/bin/osascript", ["-e", `tell application "${escapeAppleScript(target.appName)}" to activate`]);
+}
+
+export async function setLiveSessionTerminalTitle(
+  pid: number,
+  title: string,
+  options: FocusLiveSessionOptions = {},
+): Promise<boolean> {
+  const platform = options.platform ?? process.platform;
+  const runner = options.runner ?? runProcess;
+  if (platform !== "darwin") return false;
+
+  const tty = await ttyForPid(pid, runner);
+  const target = await findTerminalTarget(pid, runner);
+  if (!tty || !target) return false;
+
+  const normalizedTitle = normalizeTerminalTitle(title);
+  if (target.appName === "Terminal" || target.appName === "iTerm") {
+    const output = await runner("/usr/bin/osascript", [
+      "-e",
+      buildTtyTitleScript(target.appName, tty, normalizedTitle),
+    ]);
+    return output.trim() === "true";
+  }
+
+  if (target.appName === "WezTerm") {
+    const paneId = await wezTermPaneIdForPid(pid, runner);
+    if (!paneId) return false;
+    await runner("wezterm", ["cli", "set-tab-title", "--pane-id", paneId, normalizedTitle]);
+    return true;
+  }
+
+  return false;
 }
 
 async function ttyForPid(pid: number, runner: CommandRunner): Promise<string | null> {
@@ -157,6 +190,50 @@ tell application "iTerm"
   activate
 end tell
 return "false"`;
+}
+
+function buildTtyTitleScript(appName: "Terminal" | "iTerm", tty: string, title: string): string {
+  const escapedTty = escapeAppleScript(tty);
+  const escapedTitle = escapeAppleScript(title);
+  if (appName === "Terminal") {
+    return `set targetTty to "${escapedTty}"
+tell application "Terminal"
+  repeat with terminalWindow in windows
+    repeat with terminalTab in tabs of terminalWindow
+      if tty of terminalTab is targetTty then
+        set custom title of terminalTab to "${escapedTitle}"
+        set title displays custom title of terminalTab to true
+        return "true"
+      end if
+    end repeat
+  end repeat
+end tell
+return "false"`;
+  }
+
+  return `set targetTty to "${escapedTty}"
+tell application "iTerm"
+  repeat with terminalWindow in windows
+    repeat with terminalTab in tabs of terminalWindow
+      repeat with terminalSession in sessions of terminalTab
+        if tty of terminalSession is targetTty then
+          set name of terminalSession to "${escapedTitle}"
+          return "true"
+        end if
+      end repeat
+    end repeat
+  end repeat
+end tell
+return "false"`;
+}
+
+async function wezTermPaneIdForPid(pid: number, runner: CommandRunner): Promise<string | null> {
+  try {
+    const output = await runner("/bin/ps", ["eww", "-p", String(pid), "-o", "command="]);
+    return output.match(/(?:^|\s)WEZTERM_PANE=(\d+)(?=\s|$)/)?.[1] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function normalizedExecutableName(token: string | undefined): string {
