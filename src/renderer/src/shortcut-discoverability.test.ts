@@ -54,8 +54,22 @@ describe("shortcut discoverability", () => {
     );
 
     expect(shortcutReference).toContain('<dl className="shortcut-reference-list">');
-    expect(shortcutReference).toContain("<dt>{shortcut.label}</dt>");
+    expect(shortcutReference).toContain("<dt>");
+    expect(shortcutReference).toContain("{shortcut.label}");
     expect(shortcutReference).toContain("<kbd key={key}>{key}</kbd>");
     expect(shortcutReference).not.toMatch(/<(?:input|select|button)\b/);
+  });
+
+  it("maps paired match actions explicitly for assistive technology", () => {
+    const shortcutReference = sourceBlock(
+      '<section className="shortcut-reference"',
+      "</section>",
+    );
+
+    expect(appSource).toContain(
+      'l("Previous match: Shift + Enter; next match: Enter", "上一个匹配：Shift + Enter；下一个匹配：Enter")',
+    );
+    expect(shortcutReference).toContain('<span className="shortcut-reference-accessible">{shortcut.accessibleLabel}</span>');
+    expect(shortcutReference).toContain('<dd aria-hidden={shortcut.accessibleLabel ? "true" : undefined}>');
   });
 });

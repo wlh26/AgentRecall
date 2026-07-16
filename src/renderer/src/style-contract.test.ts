@@ -69,6 +69,7 @@ describe("stylesheet theme contract", () => {
     const row = stylesheet.match(/\.shortcut-reference-row\s*\{[^}]*\}/)?.[0] ?? "";
     const keys = stylesheet.match(/\.shortcut-reference-row dd\s*\{[^}]*\}/)?.[0] ?? "";
     const keycap = stylesheet.match(/\.shortcut-reference-combo kbd\s*\{[^}]*\}/)?.[0] ?? "";
+    const accessible = stylesheet.match(/\.shortcut-reference-accessible\s*\{[^}]*\}/)?.[0] ?? "";
     const narrowRow = stylesheet.match(/@media \(max-width:\s*640px\)\s*\{[\s\S]*?\.shortcut-reference-row\s*\{[^}]*\}/)?.[0] ?? "";
 
     expect(reference).toMatch(/display:\s*grid/);
@@ -77,6 +78,12 @@ describe("stylesheet theme contract", () => {
     expect(keys).toMatch(/justify-content:\s*flex-end/);
     expect(keycap).toMatch(/font-family:\s*var\(--mono\)/);
     expect(keycap).toMatch(/white-space:\s*nowrap/);
+    expect(accessible).toMatch(/position:\s*absolute/);
+    expect(accessible).toMatch(/width:\s*1px/);
+    expect(accessible).toMatch(/height:\s*1px/);
+    expect(accessible).toMatch(/overflow:\s*hidden/);
+    expect(accessible).toMatch(/clip-path:\s*inset\(50%\)/);
+    expect(accessible).toMatch(/white-space:\s*nowrap/);
     expect(narrowRow).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)/);
   });
 
