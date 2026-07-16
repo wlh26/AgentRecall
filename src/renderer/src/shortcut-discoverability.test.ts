@@ -1,0 +1,61 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+
+const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+
+function sourceBlock(startNeedle: string, endNeedle: string): string {
+  const start = appSource.indexOf(startNeedle);
+  const end = appSource.indexOf(endNeedle, start + startNeedle.length);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  return appSource.slice(start, end);
+}
+
+describe("shortcut discoverability", () => {
+  it("lists every product-level app shortcut with platform-aware modifiers", () => {
+    const shortcutSettings = sourceBlock(
+      '{activeSection === "shortcut" ? (',
+      '{activeSection === "connections" ? (',
+    );
+
+    expect(appSource).toContain('const appShortcutModifier = RUNTIME_PLATFORM === "darwin" ? "⌘" : "Ctrl";');
+    for (const label of [
+      'l("Focus search", "聚焦搜索")',
+      'l("Search", "执行搜索")',
+      'l("Select session", "选择会话")',
+      'l("Open details", "打开详情")',
+      'l("Resume selected session", "恢复选中会话")',
+      'l("Find in conversation", "会话内查找")',
+      'l("Previous / next match", "上一个 / 下一个匹配")',
+      'l("Close current panel or dialog", "关闭当前面板或弹窗")',
+    ]) {
+      expect(appSource).toContain(label);
+    }
+    for (const keys of [
+      'keyGroups: [[appShortcutModifier, "K"]]',
+      'keyGroups: [["Enter"]]',
+      'keyGroups: [["↑"], ["↓"]]',
+      'keyGroups: [["Space"]]',
+      'keyGroups: [[appShortcutModifier, "Enter"]]',
+      'keyGroups: [[appShortcutModifier, "F"]]',
+      'keyGroups: [["Shift", "Enter"], ["Enter"]]',
+      'keyGroups: [["Esc"]]',
+    ]) {
+      expect(appSource).toContain(keys);
+    }
+    expect(shortcutSettings).toContain('l("App shortcuts", "应用内快捷键")');
+    expect(shortcutSettings).toContain('l("These shortcuts cannot be customized.", "这些快捷键不可自定义。")');
+  });
+
+  it("renders the shortcut reference as semantic read-only content", () => {
+    const shortcutReference = sourceBlock(
+      '<section className="shortcut-reference"',
+      "</section>",
+    );
+
+    expect(shortcutReference).toContain('<dl className="shortcut-reference-list">');
+    expect(shortcutReference).toContain("<dt>{shortcut.label}</dt>");
+    expect(shortcutReference).toContain("<kbd key={key}>{key}</kbd>");
+    expect(shortcutReference).not.toMatch(/<(?:input|select|button)\b/);
+  });
+});
