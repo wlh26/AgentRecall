@@ -757,7 +757,10 @@ function disambiguateTaskLabels(summaries: ProjectSummaryDraft[]): ProjectSummar
   for (const group of finalGroups.values()) {
     if (group.length < 2) continue;
     for (const summary of group) {
-      summary.labelSuffix = appendLabelSuffix(summary.labelSuffix, projectBasename(summary.path));
+      if (!summary.taskBasenameApplied) {
+        summary.labelSuffix = appendLabelSuffix(summary.labelSuffix, projectBasename(summary.path));
+        summary.taskBasenameApplied = true;
+      }
     }
   }
   return withTimeSuffixes;
