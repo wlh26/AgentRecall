@@ -46,6 +46,67 @@ function projectByPath(store: SessionStore, projectPath: string) {
   return project!;
 }
 
+type ListedProject = ReturnType<SessionStore["listProjects"]>[number];
+
+function addSshEnvironment(store: SessionStore, id: string, label: string): void {
+  store.upsertEnvironment({
+    id,
+    kind: "ssh",
+    label,
+    hostAlias: id,
+    host: `${id}.example.com`,
+    user: null,
+    port: null,
+    authMode: "none",
+    identityFile: null,
+    enabled: true,
+  });
+}
+
+function captureProjectSortComparison(
+  store: SessionStore,
+  leftIdentity: Pick<ListedProject, "path" | "environmentId">,
+  rightIdentity: Pick<ListedProject, "path" | "environmentId">,
+): [number, number] {
+  let comparison: [number, number] | null = null;
+  const originalSort = Array.prototype.sort as (
+    this: unknown[],
+    compareFn?: (left: unknown, right: unknown) => number,
+  ) => unknown[];
+  const sortSpy = vi.spyOn(Array.prototype, "sort").mockImplementation(function (
+    this: unknown[],
+    compareFn?: (left: unknown, right: unknown) => number,
+  ) {
+    if (compareFn) {
+      const projects = this.filter(
+        (value): value is ListedProject =>
+          typeof value === "object" &&
+          value !== null &&
+          "path" in value &&
+          "environmentId" in value &&
+          "labelSuffix" in value,
+      );
+      const left = projects.find(
+        (project) =>
+          project.path === leftIdentity.path && project.environmentId === leftIdentity.environmentId,
+      );
+      const right = projects.find(
+        (project) =>
+          project.path === rightIdentity.path && project.environmentId === rightIdentity.environmentId,
+      );
+      if (left && right) comparison = [compareFn(left, right), compareFn(right, left)];
+    }
+    return originalSort.call(this, compareFn);
+  } as typeof Array.prototype.sort);
+  try {
+    store.listProjects();
+  } finally {
+    sortSpy.mockRestore();
+  }
+  expect(comparison).not.toBeNull();
+  return comparison!;
+}
+
 const traceEvents: SessionTraceEvent[] = [
   {
     index: 0,
@@ -1589,6 +1650,272 @@ describe("SessionStore", () => {
     expect(projectByPath(store, "/home/b/Codex/2026-07-19/task").labelSuffix).toBe(
       "07-19 10:32 · task · b",
     );
+  });
+
+  it("does not append an untitled task basename twice before parent disambiguation", () => {
+    const store = createInMemoryStore();
+    for (const owner of ["a", "b"]) {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:untitled-parent-${owner}`,
+          rawId: `untitled-parent-${owner}`,
+          source: "codex-app",
+          projectPath: `/home/${owner}/Codex/2026-07-19/task`,
+          originalTitle: "Untitled Session",
+          firstQuestion: "",
+        }),
+        [],
+      );
+    }
+
+    expect(projectByPath(store, "/home/a/Codex/2026-07-19/task").labelSuffix).toBe("task · a");
+    expect(projectByPath(store, "/home/b/Codex/2026-07-19/task").labelSuffix).toBe("task · b");
+  });
+
+  it("chooses distinct parent fragments for three same-title same-minute same-basename tasks", () => {
+    const store = createInMemoryStore();
+    const startedAt = new Date(2026, 6, 19, 10, 32).toISOString();
+    for (const owner of ["a", "b", "c"]) {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:three-parent-${owner}`,
+          rawId: `three-parent-${owner}`,
+          source: "codex-app",
+          projectPath: `/home/${owner}/Codex/2026-07-19/task`,
+          originalTitle: "三路同名任务",
+        }),
+        [{ role: "user", content: "first", timestamp: startedAt, index: 0 }],
+      );
+    }
+
+    expect(["a", "b", "c"].map((owner) => projectByPath(store, `/home/${owner}/Codex/2026-07-19/task`).labelSuffix)).toEqual([
+      "07-19 10:32 · task · a",
+      "07-19 10:32 · task · b",
+      "07-19 10:32 · task · c",
+    ]);
+  });
+
+  it("searches parent fragments at equal relative depths for paths with different total depths", () => {
+    const store = createInMemoryStore();
+    const startedAt = new Date(2026, 6, 19, 10, 32).toISOString();
+    const cases = [
+      ["/home/a/Codex/2026-07-19/task", "home"],
+      ["/mnt/team/a/Codex/2026-07-19/task", "team"],
+    ] as const;
+    cases.forEach(([projectPath], index) => {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:different-depth-${index}`,
+          rawId: `different-depth-${index}`,
+          source: "codex-app",
+          projectPath,
+          originalTitle: "不同深度任务",
+        }),
+        [{ role: "user", content: "first", timestamp: startedAt, index: 0 }],
+      );
+    });
+
+    expect(cases.map(([projectPath]) => projectByPath(store, projectPath).labelSuffix)).toEqual(
+      cases.map(([, fragment]) => `07-19 10:32 · task · ${fragment}`),
+    );
+  });
+
+  it("uses raw project paths when no parent segment is unique", () => {
+    const store = createInMemoryStore();
+    const startedAt = new Date(2026, 6, 19, 10, 32).toISOString();
+    const paths = [
+      "/home/a/Codex/2026-07-19/task",
+      "home\\a\\Codex\\2026-07-19\\task",
+    ];
+    paths.forEach((projectPath, index) => {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:raw-path-${index}`,
+          rawId: `raw-path-${index}`,
+          source: "codex-app",
+          projectPath,
+          originalTitle: "原始路径兜底",
+        }),
+        [{ role: "user", content: "first", timestamp: startedAt, index: 0 }],
+      );
+    });
+
+    expect(paths.map((projectPath) => projectByPath(store, projectPath).labelSuffix)).toEqual(
+      paths.map((projectPath) => `07-19 10:32 · task · ${projectPath}`),
+    );
+  });
+
+  it("ignores invalid and pre-epoch root message timestamps before the first positive timestamp", () => {
+    const store = createInMemoryStore();
+    const cases = [
+      ["/Users/me/Documents/Codex/2026-07-19/invalid-a", new Date(2026, 6, 19, 10, 32)],
+      ["/Users/me/Documents/Codex/2026-07-19/invalid-b", new Date(2026, 6, 19, 10, 45)],
+    ] as const;
+    cases.forEach(([projectPath, startedAt], index) => {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:invalid-time-${index}`,
+          rawId: `invalid-time-${index}`,
+          source: "codex-app",
+          projectPath,
+          originalTitle: "无效时间过滤",
+        }),
+        [
+          { role: "user", content: "invalid", timestamp: "not-a-time", index: 0 },
+          { role: "assistant", content: "pre-epoch", timestamp: "1960-01-01T00:00:00.000Z", index: 1 },
+          { role: "user", content: "first positive", timestamp: startedAt.toISOString(), index: 2 },
+          {
+            role: "assistant",
+            content: "later positive",
+            timestamp: new Date(2026, 6, 19, 12, 0).toISOString(),
+            index: 3,
+          },
+        ],
+      );
+    });
+
+    expect(cases.map(([projectPath]) => projectByPath(store, projectPath).labelSuffix)).toEqual([
+      "07-19 10:32",
+      "07-19 10:45",
+    ]);
+  });
+
+  it("uses raw code units when canonically equivalent base labels compare equal by locale", () => {
+    const store = createInMemoryStore();
+    const decomposed = "e\u0301";
+    const composed = "é";
+    const decomposedIdentity = {
+      path: `/Users/me/Documents/Codex/2026-07-19/${composed}`,
+      environmentId: `ssh-base-${composed}`,
+    };
+    const composedIdentity = {
+      path: `/Users/me/Documents/Codex/2026-07-19/${decomposed}`,
+      environmentId: `ssh-base-${decomposed}`,
+    };
+    addSshEnvironment(store, decomposedIdentity.environmentId, "base-left");
+    addSshEnvironment(store, composedIdentity.environmentId, "base-right");
+    for (const [identity, title, index] of [
+      [decomposedIdentity, decomposed, 0],
+      [composedIdentity, composed, 1],
+    ] as const) {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `unicode-base-${index}`,
+          rawId: `unicode-base-${index}`,
+          source: "codex-app",
+          environmentId: identity.environmentId,
+          projectPath: identity.path,
+          originalTitle: title,
+        }),
+        messages,
+      );
+    }
+
+    expect(decomposed.localeCompare(composed)).toBe(0);
+    const [forward, reverse] = captureProjectSortComparison(store, decomposedIdentity, composedIdentity);
+    expect(forward).toBeLessThan(0);
+    expect(reverse).toBeGreaterThan(0);
+  });
+
+  it("uses raw code units when canonically equivalent suffixes compare equal by locale", () => {
+    const store = createInMemoryStore();
+    const decomposed = "e\u0301";
+    const composed = "é";
+    const projectPath = "/Users/me/Documents/Codex/2026-07-19/unicode-suffix";
+    const decomposedIdentity = { path: projectPath, environmentId: `ssh-suffix-${composed}` };
+    const composedIdentity = { path: projectPath, environmentId: `ssh-suffix-${decomposed}` };
+    addSshEnvironment(store, decomposedIdentity.environmentId, decomposed);
+    addSshEnvironment(store, composedIdentity.environmentId, composed);
+    for (const [identity, index] of [
+      [decomposedIdentity, 0],
+      [composedIdentity, 1],
+    ] as const) {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `unicode-suffix-${index}`,
+          rawId: `unicode-suffix-${index}`,
+          source: "codex-app",
+          environmentId: identity.environmentId,
+          projectPath,
+          originalTitle: "Unicode suffix",
+        }),
+        messages,
+      );
+    }
+
+    expect(decomposed.localeCompare(composed)).toBe(0);
+    const [forward, reverse] = captureProjectSortComparison(store, decomposedIdentity, composedIdentity);
+    expect(forward).toBeLessThan(0);
+    expect(reverse).toBeGreaterThan(0);
+  });
+
+  it("uses raw code units when canonically equivalent paths compare equal by locale", () => {
+    const store = createInMemoryStore();
+    const decomposed = "e\u0301";
+    const composed = "é";
+    const decomposedIdentity = {
+      path: `/Users/me/Documents/Codex/2026-07-19/${decomposed}`,
+      environmentId: `ssh-path-${composed}`,
+    };
+    const composedIdentity = {
+      path: `/Users/me/Documents/Codex/2026-07-19/${composed}`,
+      environmentId: `ssh-path-${decomposed}`,
+    };
+    addSshEnvironment(store, decomposedIdentity.environmentId, "path-left");
+    addSshEnvironment(store, composedIdentity.environmentId, "path-right");
+    for (const [identity, index] of [
+      [decomposedIdentity, 0],
+      [composedIdentity, 1],
+    ] as const) {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `unicode-path-${index}`,
+          rawId: `unicode-path-${index}`,
+          source: "codex-app",
+          environmentId: identity.environmentId,
+          projectPath: identity.path,
+          originalTitle: "Unicode path",
+        }),
+        messages,
+      );
+    }
+
+    expect(decomposedIdentity.path.localeCompare(composedIdentity.path)).toBe(0);
+    const [forward, reverse] = captureProjectSortComparison(store, decomposedIdentity, composedIdentity);
+    expect(forward).toBeLessThan(0);
+    expect(reverse).toBeGreaterThan(0);
+  });
+
+  it("uses raw code units when canonically equivalent environment identities compare equal by locale", () => {
+    const store = createInMemoryStore();
+    const decomposed = "e\u0301";
+    const composed = "é";
+    const projectPath = "/Users/me/Documents/Codex/2026-07-19/unicode-environment";
+    const decomposedIdentity = { path: projectPath, environmentId: `ssh-environment-${decomposed}` };
+    const composedIdentity = { path: projectPath, environmentId: `ssh-environment-${composed}` };
+    addSshEnvironment(store, decomposedIdentity.environmentId, "same-environment-label");
+    addSshEnvironment(store, composedIdentity.environmentId, "same-environment-label");
+    for (const [identity, index] of [
+      [decomposedIdentity, 0],
+      [composedIdentity, 1],
+    ] as const) {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `unicode-environment-${index}`,
+          rawId: `unicode-environment-${index}`,
+          source: "codex-app",
+          environmentId: identity.environmentId,
+          projectPath,
+          originalTitle: "Unicode environment",
+        }),
+        messages,
+      );
+    }
+
+    expect(decomposedIdentity.environmentId.localeCompare(composedIdentity.environmentId)).toBe(0);
+    const [forward, reverse] = captureProjectSortComparison(store, decomposedIdentity, composedIdentity);
+    expect(forward).toBeLessThan(0);
+    expect(reverse).toBeGreaterThan(0);
   });
 
   it("sorts tied projects by suffix, path, and environment identity", () => {

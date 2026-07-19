@@ -101,6 +101,7 @@ type ProjectAggregateRow = {
 type ProjectSummaryDraft = ProjectSummary & {
   taskWorkspaceDate: string | null;
   rootStartedAt: number;
+  taskBasenameApplied: boolean;
 };
 
 interface TraceEventRow {
@@ -816,6 +817,7 @@ export class SessionsStore {
         lastActivityAt: row.last_activity_at,
         taskWorkspaceDate: taskDate,
         rootStartedAt: row.root_started_at ?? 0,
+        taskBasenameApplied: false,
       };
     });
     const basenameCounts = new Map<string, number>();
@@ -847,26 +849,28 @@ export class SessionsStore {
               : summary.labelSuffix,
           };
         })
-        .map((summary) => ({
-          ...summary,
-          labelSuffix:
-            summary.labelKind === "codex-task-untitled"
-              ? appendLabelSuffix(
-                  summary.labelSuffix,
-                  formatMonthDayTime(summary.rootStartedAt) || projectBasename(summary.path),
-                )
-              : summary.labelSuffix,
-        })),
+        .map((summary) => {
+          if (summary.labelKind !== "codex-task-untitled") return summary;
+          const startedAtSuffix = formatMonthDayTime(summary.rootStartedAt);
+          return {
+            ...summary,
+            labelSuffix: appendLabelSuffix(
+              summary.labelSuffix,
+              startedAtSuffix || projectBasename(summary.path),
+            ),
+            taskBasenameApplied: summary.taskBasenameApplied || !startedAtSuffix,
+          };
+        }),
     )
       .map(publicProjectSummary)
       .sort(
         (a, b) =>
           environmentSortValue(a.environmentId) - environmentSortValue(b.environmentId) ||
           b.lastActivityAt - a.lastActivityAt ||
-          a.label.localeCompare(b.label) ||
-          (a.labelSuffix ?? "").localeCompare(b.labelSuffix ?? "") ||
-          a.path.localeCompare(b.path) ||
-          a.environmentId.localeCompare(b.environmentId),
+          compareProjectText(a.label, b.label) ||
+          compareProjectText(a.labelSuffix ?? "", b.labelSuffix ?? "") ||
+          compareProjectText(a.path, b.path) ||
+          compareProjectText(a.environmentId, b.environmentId),
       );
   }
 
@@ -1973,7 +1977,10 @@ function disambiguateTaskLabels(summaries: ProjectSummaryDraft[]): ProjectSummar
   for (const group of finalGroups.values()) {
     if (group.length < 2) continue;
     for (const summary of group) {
-      summary.labelSuffix = appendLabelSuffix(summary.labelSuffix, projectBasename(summary.path));
+      if (!summary.taskBasenameApplied) {
+        summary.labelSuffix = appendLabelSuffix(summary.labelSuffix, projectBasename(summary.path));
+        summary.taskBasenameApplied = true;
+      }
     }
   }
 
@@ -2011,6 +2018,12 @@ function formatMonthDayTime(timestamp: number | null): string | null {
   if (Number.isNaN(date.getTime())) return null;
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function compareProjectText(left: string, right: string): number {
+  const localized = left.localeCompare(right);
+  if (localized !== 0 || left === right) return localized;
+  return left < right ? -1 : 1;
 }
 
 function publicProjectSummary(draft: ProjectSummaryDraft): ProjectSummary {

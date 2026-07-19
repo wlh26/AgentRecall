@@ -15,7 +15,7 @@
 - `custom_title` 优先于 `original_title`，后者已经吸收 Codex `thread_name` 和会话元数据标题；随后回退到 `first_question`。
 - subagent 不参与名称选择，但现有可见性设置仍决定项目会话计数和活动时间。
 - 不读取任务目录正文，不要求目录存在，不修改真实 Codex 会话、物理目录或 Resume 路径。
-- 时间、basename 仍碰撞时继续使用最短唯一父路径片段，最后才使用原始项目路径；最终排序在环境优先级、活动时间和基础名称后比较后缀、路径、环境身份。
+- 时间、basename 仍碰撞时继续使用最短唯一父路径片段，最后才使用原始项目路径；basename 阶段用内部标记保证只执行一次。最终排序在环境优先级、活动时间后比较基础名称、后缀、路径、环境身份，每个文本键 locale 相等后继续按原始 UTF-16 code units 比较。
 - 不新增 AI 请求、设置项、IPC 或数据库 schema。
 - 普通项目和其他来源保持当前路径标签、父目录消歧和跨环境消歧行为。
 - macOS、Linux、Windows 路径测试使用合成数据；不得读取或改写真实用户会话。
@@ -530,6 +530,7 @@ return {
 type ProjectSummaryDraft = ProjectSummary & {
   taskWorkspaceDate: string | null;
   rootStartedAt: number;
+  taskBasenameApplied: boolean;
 };
 
 function publicProjectSummary(draft: ProjectSummaryDraft): ProjectSummary {
@@ -547,7 +548,7 @@ function publicProjectSummary(draft: ProjectSummaryDraft): ProjectSummary {
 }
 ```
 
-Task 1 的父目录 basename 消歧只处理 `labelKind === "path"`；环境后缀仍可用于所有 label kind。环境后缀处理完成后，对 `labelKind === "codex-task-untitled"` 的 draft 调用 `appendLabelSuffix(draft.labelSuffix, formatMonthDayTime(draft.rootStartedAt) || projectBasename(draft.path))`，从而保持“环境、稳定开始时间或 basename”的后缀顺序。最终返回前调用 `.map(publicProjectSummary)`。
+Task 1 的父目录 basename 消歧只处理 `labelKind === "path"`；环境后缀仍可用于所有 label kind。所有 draft 初始设置 `taskBasenameApplied: false`。环境后缀处理完成后，对 `labelKind === "codex-task-untitled"` 的 draft 调用 `appendLabelSuffix(draft.labelSuffix, formatMonthDayTime(draft.rootStartedAt) || projectBasename(draft.path))`，从而保持“环境、稳定开始时间或 basename”的后缀顺序；使用 basename 兜底时同时设置 `taskBasenameApplied: true`。最终返回前调用 `.map(publicProjectSummary)`，内部标记不得进入公开 `ProjectSummary`。
 
 - [ ] **Step 4: 运行任务识别测试**
 
@@ -679,7 +680,7 @@ it("keeps environment suffixes ahead of task-title collision handling", () => {
 });
 ```
 
-最终审查修订还要先增加以下聚焦回归覆盖：同日同标题任务使用各自最早根消息分钟；仅改变 `IndexedSession.timestamp` 的重新索引保持后缀不变；有标题与未命名任务在缺失消息时间时分别按碰撞流程或直接回退 basename；`/home/a/.../task` 与 `/home/b/.../task` 追加 `a` / `b`；主排序键相同后按后缀、路径和环境身份排序；`codex-cli` 日期路径仍保持 `labelKind: "path"`。
+最终审查修订还要先增加以下聚焦回归覆盖：同日同标题任务使用各自最早根消息分钟；仅改变 `IndexedSession.timestamp` 的重新索引保持后缀不变；有标题与未命名任务在缺失消息时间时分别按碰撞流程或直接回退 basename；未命名碰撞不重复追加 basename；`/home/a/.../task` 与 `/home/b/.../task` 追加 `a` / `b`；覆盖三个以上碰撞项、不同总深度和无唯一父片段的 raw path 兜底；无效及纪元前消息时间不遮蔽后续正数时间；主排序键相同后按后缀、路径和环境身份排序；基础名称、后缀、路径、环境身份使用 Unicode 规范等价值时仍按原始 code units 得到非零比较；`codex-cli` 日期路径仍保持 `labelKind: "path"`。
 
 - [ ] **Step 2: 运行测试并确认重复标题尚未消歧**
 
@@ -763,9 +764,9 @@ function disambiguateTaskLabels(summaries: ProjectSummaryDraft[]): ProjectSummar
 }
 ```
 
-basename 追加后必须重新按“环境、规范化基础标题、完整后缀”分组。仍碰撞的组从最近父级开始，在相同相对深度向外查找首个全部非空且组内唯一的路径片段；找到后为组内各项追加对应片段，找不到则追加各自原始 `path` 作为最终稳定兜底。
+basename 阶段仅对 `taskBasenameApplied === false` 的 draft 追加 basename，并立即把标记设为 `true`。这使第一阶段已经用 basename 处理的未命名任务直接进入下一阶段。随后重新按“环境、规范化基础标题、完整后缀”分组；仍碰撞的组从最近父级开始，在相同相对深度向外查找首个全部非空且组内唯一的路径片段，找到后为组内各项追加对应片段，找不到则追加各自原始 `path` 作为最终稳定兜底。
 
-在 `listProjects()` 中先应用现有路径/环境消歧，再调用 `disambiguateTaskLabels()`，最后 `.map(publicProjectSummary)` 和排序。环境后缀不得加入同一环境标题的分组 key。排序比较器在现有环境优先级、`lastActivityAt` 和基础 `label` 之后，依次比较 `labelSuffix ?? ""`、`path`、`environmentId`。
+在 `listProjects()` 中先应用现有路径/环境消歧，再调用 `disambiguateTaskLabels()`，最后 `.map(publicProjectSummary)` 和排序。环境后缀不得加入同一环境标题的分组 key。排序比较器在现有环境优先级、`lastActivityAt` 之后，依次比较基础 `label`、`labelSuffix ?? ""`、`path`、`environmentId`。每个文本键先调用 `localeCompare`；返回 0 且原始字符串不同时，用 JavaScript 原始字符串 `<` 比较提供 UTF-16 code-unit 兜底。
 
 - [ ] **Step 4: 运行项目聚合测试**
 
@@ -944,7 +945,9 @@ git commit -m "docs: add Codex task label release note"
 - [ ] 普通项目、其他来源、路径筛选、Resume 与跨环境行为无回归。
 - [ ] 重复标题按稳定根消息时间、日期、时间、basename、唯一父路径片段和最终原始路径稳定消歧。
 - [ ] 缺失根消息时间时未命名任务使用 basename；重新索引的会话索引时间不改变标签。
-- [ ] 项目主排序键相同时按后缀、路径、环境身份确定排序，`codex-cli` 不进入友好任务命名。
+- [ ] 未命名碰撞不重复追加 basename；三个以上、不同深度和无唯一父片段的碰撞组均有稳定结果。
+- [ ] 无效及纪元前消息时间不遮蔽后续正数消息时间。
+- [ ] 项目各文本排序键 locale 相等后按原始 UTF-16 code units 确定排序，`codex-cli` 不进入友好任务命名。
 - [ ] 中文与英文未命名占位符在项目树、筛选标签和搜索提示中一致。
 - [ ] `npm run build:mcp`、`npm run typecheck`、`npm test`、`npm run release-note:check` 全部退出 0。
 - [ ] 分支相对 `main` 恰好新增一份用户可见发布说明。
