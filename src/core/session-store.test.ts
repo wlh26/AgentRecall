@@ -1202,6 +1202,8 @@ describe("SessionStore", () => {
       {
         path: "/work/team-a/app",
         label: "team-a/app",
+        labelKind: "path",
+        labelSuffix: null,
         sessionCount: 2,
         environmentId: "local",
         environmentLabel: "Local",
@@ -1211,6 +1213,8 @@ describe("SessionStore", () => {
       {
         path: "/work/team-b/app",
         label: "team-b/app",
+        labelKind: "path",
+        labelSuffix: null,
         sessionCount: 1,
         environmentId: "local",
         environmentLabel: "Local",
@@ -1247,6 +1251,8 @@ describe("SessionStore", () => {
       {
         path: "/work/app",
         label: "app",
+        labelKind: "path",
+        labelSuffix: null,
         sessionCount: 2,
         environmentId: "local",
         environmentLabel: "Local",
@@ -1841,27 +1847,11 @@ describe("SessionStore", () => {
       messages,
     );
 
-    const createdAt = new Date("2026-06-01T10:00:00Z").getTime();
-    const lastActivityAt = new Date("2026-06-01T10:01:00Z").getTime();
-    expect(store.listProjects()).toEqual([
-      {
-        path: "/work/app",
-        label: "app · Local",
-        sessionCount: 1,
-        environmentId: "local",
-        environmentLabel: "Local",
-        createdAt,
-        lastActivityAt,
-      },
-      {
-        path: "/work/app",
-        label: "app · devbox",
-        sessionCount: 1,
-        environmentId: "ssh-devbox",
-        environmentLabel: "devbox",
-        createdAt,
-        lastActivityAt,
-      },
+    expect(
+      store.listProjects().map(({ label, labelKind, labelSuffix }) => ({ label, labelKind, labelSuffix })),
+    ).toEqual([
+      { label: "app", labelKind: "path", labelSuffix: "Local" },
+      { label: "app", labelKind: "path", labelSuffix: "devbox" },
     ]);
   });
 

@@ -772,6 +772,8 @@ export class SessionsStore {
     const summaries = rows.map((row) => ({
       path: row.project_path,
       label: projectLabel(row.project_path),
+      labelKind: "path" as const,
+      labelSuffix: null,
       sessionCount: row.session_count,
       environmentId: row.environment_id,
       environmentLabel: row.environment_label ?? localEnvironment().label,
@@ -789,15 +791,19 @@ export class SessionsStore {
     }
 
     return summaries
-      .map((summary) => ({
-        ...summary,
-        label:
-          (environmentsByPath.get(summary.path)?.size ?? 0) > 1
-            ? `${summary.label} · ${summary.environmentLabel}`
-            : (basenameCounts.get(projectBasename(summary.path)) || 0) > 1
+      .map((summary) => {
+        const repeatedAcrossEnvironments = (environmentsByPath.get(summary.path)?.size ?? 0) > 1;
+        return {
+          ...summary,
+          label:
+            !repeatedAcrossEnvironments && (basenameCounts.get(projectBasename(summary.path)) || 0) > 1
               ? projectParentLabel(summary.path)
               : summary.label,
-      }))
+          labelSuffix: repeatedAcrossEnvironments
+            ? appendLabelSuffix(summary.labelSuffix, summary.environmentLabel)
+            : summary.labelSuffix,
+        };
+      })
       .sort(
         (a, b) =>
           environmentSortValue(a.environmentId) - environmentSortValue(b.environmentId) ||
@@ -1828,9 +1834,13 @@ function projectLabel(projectPath: string): string {
   return projectBasename(projectPath) || projectPath;
 }
 
+function appendLabelSuffix(current: string | null, next: string | null): string | null {
+  if (!next) return current;
+  return current ? `${current} · ${next}` : next;
+}
+
 function projectParentLabel(projectPath: string): string {
   const parts = projectParts(projectPath);
   if (parts.length >= 2) return `${parts.at(-2)}/${parts.at(-1)}`;
   return projectLabel(projectPath);
 }
-
