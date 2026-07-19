@@ -3005,7 +3005,7 @@ select:focus-visible {
 .skills-dialog {
   display: flex;
   width: min(1320px, calc(100vw - 40px));
-  height: min(720px, calc(100vh - 40px));
+  height: min(900px, calc(100vh - 24px));
   min-height: 520px;
   flex-direction: column;
   padding: 0;
@@ -3639,11 +3639,101 @@ select:focus-visible {
   white-space: nowrap;
 }
 
-.skill-preview-head p {
-  margin: 6px 0 0;
+.skill-preview-mode-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--panel-subtle);
+}
+
+.skill-preview-mode-tabs button {
+  min-width: 88px;
+  height: 30px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 7px;
   color: var(--text-muted);
   font-size: 12.5px;
-  line-height: 1.45;
+  font-weight: 700;
+}
+
+.skill-preview-mode-tabs button:hover {
+  color: var(--text);
+}
+
+.skill-preview-mode-tabs button.active {
+  border-color: var(--border-strong);
+  background: var(--panel-bg);
+  color: var(--accent);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
+}
+
+.skill-overview-content {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  background: var(--message-bg);
+}
+
+.skill-overview-intro {
+  padding: 18px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--panel-bg);
+}
+
+.skill-overview-intro h4,
+.skill-overview-card h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.skill-overview-intro p {
+  margin: 7px 0 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.skill-overview-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  padding: 14px 18px 22px;
+}
+
+.skill-overview-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--panel-bg);
+}
+
+.skill-overview-card h4 {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.skill-overview-card .skill-meta {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 14px;
+  border-bottom: 0;
+}
+
+.skill-overview-card .skill-meta-wide {
+  grid-column: 1 / -1;
+}
+
+.skill-overview-empty {
+  margin: 0;
+  padding: 18px 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .skill-version-strip {

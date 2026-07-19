@@ -71,6 +71,11 @@ describe("skills dialog actions", () => {
     expect(compactHead).toMatch(/white-space:\s*nowrap/);
   });
 
+  it("uses the local Skill itself rather than a cloud binding for installed status", () => {
+    expect(skillsDialogSource).toContain("const localVersion = entry.local");
+    expect(skillsDialogSource).not.toContain("const localVersion = entry.relation?.localSkillPath");
+  });
+
   it("separates version status from the description and scrolls only changed files", () => {
     const diffFiles = stylesheet.match(/\.skill-diff-files\s*\{[^}]*\}/)?.[0] ?? "";
 
@@ -79,6 +84,36 @@ describe("skills dialog actions", () => {
     expect(skillsDialogSource).toContain('snapshot.files.filter((file) => file.status !== "unchanged")');
     expect(skillsDialogSource).toContain("changedFiles.map");
     expect(diffFiles).toMatch(/overflow-y:\s*auto/);
+  });
+
+  it("separates the Skill overview from its full documentation", () => {
+    const modeTabs = stylesheet.match(/\.skill-preview-mode-tabs\s*\{[^}]*\}/)?.[0] ?? "";
+    const overviewContent = stylesheet.match(/\.skill-overview-content\s*\{[^}]*\}/)?.[0] ?? "";
+    const overviewIndex = skillsDialogSource.indexOf('previewView === "overview"');
+    const detailTabsIndex = skillsDialogSource.indexOf('className="skill-detail-tabs"', overviewIndex);
+    const markdownIndex = skillsDialogSource.indexOf('className="skill-markdown-preview"', detailTabsIndex);
+
+    expect(skillsDialogSource).toContain('useState<"overview" | "details">("overview")');
+    expect(skillsDialogSource).toContain('className="skill-preview-mode-tabs"');
+    expect(skillsDialogSource).toContain('{l("Overview", "概述")}');
+    expect(skillsDialogSource).toContain('{l("Details", "详情")}');
+    expect(skillsDialogSource).toContain('className="skill-overview-cards"');
+    expect(overviewIndex).toBeGreaterThan(-1);
+    expect(detailTabsIndex).toBeGreaterThan(overviewIndex);
+    expect(markdownIndex).toBeGreaterThan(detailTabsIndex);
+    expect(modeTabs).toMatch(/display:\s*flex/);
+    expect(overviewContent).toMatch(/overflow:\s*auto/);
+  });
+
+  it("uses the available viewport height for Skill details", () => {
+    const skillsDialog = stylesheet.match(/\.skills-dialog\s*\{[^}]*\}/)?.[0] ?? "";
+    const previewContent = stylesheet.match(/\.skill-preview-content\s*\{[^}]*\}/)?.[0] ?? "";
+    const markdownPreview = stylesheet.match(/\.skill-markdown-preview\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(skillsDialog).toContain("height: min(900px, calc(100vh - 24px))");
+    expect(skillsDialog).not.toContain("height: min(720px");
+    expect(previewContent).toMatch(/flex:\s*1/);
+    expect(markdownPreview).toMatch(/overflow:\s*auto/);
   });
 
   it("renders local and cloud Skill documentation as Markdown", () => {
