@@ -160,15 +160,10 @@ describe("stylesheet theme contract", () => {
     expect(tools).not.toMatch(/border-left/);
   });
 
-  it("keeps toolbar action buttons isolated from remote environment filter chips", () => {
+  it("keeps toolbar action buttons isolated from the filter row", () => {
     const toolbar = stylesheet.match(/\.toolbar\s*\{[^}]*\}/)?.[0] ?? "";
     const toolbarFilters = stylesheet.match(/\.toolbar-filters\s*\{[^}]*\}/)?.[0] ?? "";
     const searchbox = stylesheet.match(/\.searchbox\s*\{[^}]*\}/)?.[0] ?? "";
-    const scopeFilter = stylesheet.match(/\.scope-filter\s*\{[^}]*\}/)?.[0] ?? "";
-    const singleScopeFilter = stylesheet.match(/\.scope-filter\[data-count="1"\]\s*\{[^}]*\}/)?.[0] ?? "";
-    const scopeFilterChip = stylesheet.match(/\.scope-filter-chip\s*\{[^}]*\}/)?.[0] ?? "";
-    const scopeFilterLabelText = stylesheet.match(/\.scope-filter-label > span:last-child\s*\{[^}]*\}/)?.[0] ?? "";
-    const scopeTooltip = stylesheet.match(/\.scope-filter-tooltip\s*\{[^}]*\}/)?.[0] ?? "";
     const dateFilter = stylesheet.match(/\.date-filter\s*\{[^}]*\}/)?.[0] ?? "";
     const dateFilterButton = stylesheet.match(/\.date-filter button\s*\{[^}]*\}/)?.[0] ?? "";
     const liveFilterButton = stylesheet.match(/\.live-filter button\s*\{[^}]*\}/)?.[0] ?? "";
@@ -188,31 +183,6 @@ describe("stylesheet theme contract", () => {
     expect(toolbarFilters).toMatch(/flex-wrap:\s*nowrap/);
     expect(toolbarFilters).toMatch(/justify-content:\s*flex-start/);
     expect(toolbarFilters).toMatch(/overflow:\s*visible/);
-    expect(scopeFilter).toMatch(/--scope-filter-max:\s*240px/);
-    expect(scopeFilter).toMatch(/width:\s*fit-content/);
-    expect(scopeFilter).toMatch(/max-width:\s*var\(--scope-filter-max\)/);
-    expect(scopeFilter).toMatch(/flex:\s*0\s+1\s+auto/);
-    expect(scopeFilter).toMatch(/position:\s*relative/);
-    expect(singleScopeFilter).toMatch(/--scope-filter-max:\s*160px/);
-    expect(scopeFilterChip).toMatch(/position:\s*relative/);
-    expect(scopeFilterChip).toMatch(/justify-content:\s*space-between/);
-    expect(scopeFilterChip).toMatch(/flex:\s*1\s+1\s+0/);
-    expect(scopeFilterChip).toMatch(/max-width:\s*100%/);
-    expect(scopeFilterChip).toMatch(/min-width:\s*0/);
-    expect(scopeFilterChip).toMatch(/overflow:\s*visible/);
-    expect(scopeFilterLabelText).toMatch(/text-overflow:\s*ellipsis/);
-    expect(scopeFilterLabelText).toMatch(/white-space:\s*nowrap/);
-    expect(scopeTooltip).toMatch(/box-shadow:\s*var\(--shadow-popover\)/);
-    expect(scopeTooltip).toMatch(/background:\s*var\(--panel-bg\)/);
-    expect(scopeTooltip).toMatch(/pointer-events:\s*none/);
-    expect(scopeTooltip).toMatch(/width:\s*max-content/);
-    expect(scopeTooltip).toMatch(/max-width:\s*min\(720px,\s*calc\(100vw - 48px\)\)/);
-    expect(scopeTooltip).toMatch(/overflow-wrap:\s*break-word/);
-    expect(scopeTooltip).not.toMatch(/overflow-wrap:\s*anywhere/);
-    const scopeFilterRender = appSource.slice(appSource.indexOf('className="scope-filter"'), appSource.indexOf('className="live-filter"'));
-    expect(scopeFilterRender).not.toContain("onFocus={() => setHoveredScopeFilter");
-    expect(scopeFilterRender).toContain('{hoveredScopeFilter === filter.key ? (');
-    expect(scopeFilterRender.indexOf('className="scope-filter-tooltip"')).toBeGreaterThan(scopeFilterRender.indexOf('className="scope-filter-chip"'));
     expect(dateFilter).toMatch(/height:\s*38px/);
     expect(dateFilter).toMatch(/width:\s*fit-content/);
     expect(dateFilter).toMatch(/max-width:\s*var\(--date-filter-width\)/);

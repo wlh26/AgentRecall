@@ -15,6 +15,7 @@ import type {
   SessionSearchResult,
   SessionSortBy,
   SessionSource,
+  SessionSourceStats,
   SessionStats,
   SessionStatsOptions,
   SessionStatsPeriod,
@@ -987,19 +988,39 @@ export class SessionsStore {
 
   getStats(options: SessionStatsOptions = {}, now = Date.now()): SessionStats {
     const range = resolveStatsRange(options, now);
+    const excludeSubagents = options.excludeSubagents ?? false;
+    const { total, bySource } = this.aggregateStatsForRange(range, excludeSubagents);
+
+    const previousRange = resolvePreviousStatsRange(range);
+    const previousTotal = previousRange
+      ? this.aggregateStatsForRange(previousRange, excludeSubagents).total
+      : null;
+
+    return {
+      total,
+      bySource,
+      range,
+      previousTotal,
+    };
+  }
+
+  private aggregateStatsForRange(
+    range: StatsRange,
+    excludeSubagents: boolean,
+  ): { total: SessionStatsSummary; bySource: SessionSourceStats[] } {
     const summariesBySource = new Map<SessionSource, SessionStatsSummary>();
 
-    for (const row of this.aggregateActiveSessionsBySource(range, options.excludeSubagents ?? false)) {
+    for (const row of this.aggregateActiveSessionsBySource(range, excludeSubagents)) {
       summaryForSource(summariesBySource, row.source).sessionCount = row.session_count;
     }
-    for (const row of this.aggregateMessagesBySource(range, options.excludeSubagents ?? false)) {
+    for (const row of this.aggregateMessagesBySource(range, excludeSubagents)) {
       summaryForSource(summariesBySource, row.source).messageCount = row.message_count;
     }
 
-    const tokenRows = this.aggregateTokenEventsBySource(range, options.excludeSubagents ?? false);
+    const tokenRows = this.aggregateTokenEventsBySource(range, excludeSubagents);
     const tokenSourceRows =
       range.since === null && tokenRows.length === 0
-        ? this.aggregateSessionTokensBySource(options.excludeSubagents ?? false)
+        ? this.aggregateSessionTokensBySource(excludeSubagents)
         : tokenRows;
     for (const row of tokenSourceRows) {
       const summary = summaryForSource(summariesBySource, row.source);
@@ -1027,11 +1048,7 @@ export class SessionsStore {
       emptyStatsSummary(),
     );
 
-    return {
-      total,
-      bySource,
-      range,
-    };
+    return { total, bySource };
   }
 
   searchSessions(options: SearchOptions = {}): SessionSearchResult[] {
@@ -1805,6 +1822,18 @@ function resolveStatsRange(options: SessionStatsOptions, now: number): StatsRang
   if (period === "today") return { period, since: startOfLocalDay(now), until: now };
   if (period === "thirtyDay") return { period, since: now - 30 * 24 * 60 * 60 * 1000, until: now };
   return { period: "sevenDay", since: now - 7 * 24 * 60 * 60 * 1000, until: now };
+}
+
+// The immediately preceding comparable window: today→yesterday, 7d→prior 7d, 30d→prior 30d.
+// allTime has no comparison and returns null.
+function resolvePreviousStatsRange(range: StatsRange): StatsRange | null {
+  if (range.period === "allTime" || range.since === null) return null;
+  if (range.period === "today") {
+    const startOfToday = range.since;
+    return { period: range.period, since: startOfToday - 24 * 60 * 60 * 1000, until: startOfToday };
+  }
+  const windowMs = range.until - range.since;
+  return { period: range.period, since: range.since - windowMs, until: range.since };
 }
 
 function startOfLocalDay(timestamp: number): number {

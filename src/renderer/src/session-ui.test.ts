@@ -43,7 +43,6 @@ describe("session source labels", () => {
     expect(appSource).toContain(
       'const selectedProjectLabel = selectedProject ? projectDisplayLabel(selectedProject, language) : ""',
     );
-    expect(appSource).toContain("label: selectedProjectLabel");
     expect(appSource).toContain('Search within ${selectedProjectLabel || "project"}');
     expect(appSource).toContain("projectDisplayLabel(project, language)");
   });

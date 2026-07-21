@@ -630,6 +630,15 @@ describe("SessionStore", () => {
         since: todayStart.getTime(),
         until: now,
       },
+      previousTotal: {
+        sessionCount: 0,
+        messageCount: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedInputTokens: 0,
+        reasoningOutputTokens: 0,
+        totalTokens: 0,
+      },
     });
     expect(store.getStats({ period: "sevenDay" }, now).total).toEqual({
       sessionCount: 2,
@@ -676,6 +685,15 @@ describe("SessionStore", () => {
         period: "thirtyDay",
         since: now - 30 * 24 * 60 * 60 * 1000,
         until: now,
+      },
+      previousTotal: {
+        sessionCount: 1,
+        messageCount: 1,
+        inputTokens: 30,
+        outputTokens: 15,
+        cachedInputTokens: 5,
+        reasoningOutputTokens: 0,
+        totalTokens: 50,
       },
     });
     expect(store.getStats({ period: "allTime" }, now).total).toEqual({

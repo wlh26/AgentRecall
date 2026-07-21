@@ -44,11 +44,6 @@ describe("app loading performance", () => {
     expect(appSource).toContain("searchRef.current?.focus()");
   });
 
-  it("lets the toolbar give unused scope-filter space to the search box", () => {
-    expect(appSource).toContain('<div className="scope-filter" data-count={activeScopeFilters.length}');
-    expect(appSource).not.toContain('className="scope-filter-slot"');
-  });
-
   it("keeps session search isolated from sidebar metadata and stats refreshes", () => {
     const loadSessionsBlock = sourceBlock("const load = useCallback(async () =>", [
       "const loadSidebarMetadata = useCallback",

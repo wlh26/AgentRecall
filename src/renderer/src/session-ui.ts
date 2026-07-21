@@ -70,6 +70,35 @@ export function hasTokenUsage(value: Pick<SessionStatsSummary, "totalTokens">): 
   return value.totalTokens > 0;
 }
 
+export type UsageDeltaKind = "new" | "up" | "down" | "flat";
+
+export interface UsageDelta {
+  kind: UsageDeltaKind;
+  // Rounded percentage change (absolute value). Undefined for "new" and "flat".
+  percent?: number;
+}
+
+// Compares a metric against the previous period. Returns "new" when the previous period had zero
+// usage but the current period has some; otherwise a signed percentage change. Returns null when
+// there is no previous period to compare against (e.g. allTime).
+export function usageDelta(current: number, previous: number | null | undefined): UsageDelta | null {
+  if (previous === null || previous === undefined) return null;
+  if (previous === 0) {
+    if (current === 0) return { kind: "flat" };
+    return { kind: "new" };
+  }
+  if (current === previous) return { kind: "flat" };
+  const change = ((current - previous) / previous) * 100;
+  return { kind: change > 0 ? "up" : "down", percent: Math.round(Math.abs(change)) };
+}
+
+export function formatUsageDelta(delta: UsageDelta): string {
+  if (delta.kind === "new") return "NEW";
+  if (delta.kind === "flat") return "0%";
+  const sign = delta.kind === "up" ? "+" : "-";
+  return `${sign}${delta.percent ?? 0}%`;
+}
+
 const BASE_SOURCE_FILTERS: Array<{ label: string; value: SearchOptions["source"] }> = [
   { label: "All", value: "all" },
   { label: "Claude Code", value: "claude" },
