@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
+import { assetIdentity } from "./asset-identity";
 
 const require = createRequire(import.meta.url);
 
@@ -216,9 +217,7 @@ function readMemoryFile(filePath: string, agent: MemoriesAgent, scope: MemoriesS
 // ---------------------------------------------------------------------------
 
 export function memoryIdentity(memory: Pick<AgentMemory, "agent" | "scope" | "name" | "projectPath">): string {
-  return memory.scope === "project"
-    ? `${memory.agent}:${memory.scope}:${memory.projectPath}:${memory.name}`
-    : `${memory.agent}:${memory.scope}:${memory.name}`;
+  return assetIdentity(memory);
 }
 
 // ---------------------------------------------------------------------------

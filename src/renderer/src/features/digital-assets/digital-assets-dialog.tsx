@@ -3,8 +3,7 @@ import type { ReactElement } from "react";
 import { PackageSearch, X } from "lucide-react";
 import type { RulesSyncSnapshot, AgentRule, RemoteRule } from "../../../../core/rules-sync";
 import type { MemoriesSyncSnapshot, AgentMemory, RemoteMemory } from "../../../../core/memories-sync";
-import { ruleIdentity } from "../../../../core/rules-sync";
-import { memoryIdentity } from "../../../../core/memories-sync";
+import { assetIdentity } from "../../../../core/asset-identity";
 import { localize, type LanguageMode } from "../../language";
 import { AssetSyncTab, type LocalAssetItem, type RemoteAssetItem } from "./asset-sync-tab";
 import type { SyncStatusKind } from "./sync-status-badge";
@@ -133,7 +132,7 @@ export function DigitalAssetsDialog({
   const rulesLocalItems: LocalAssetItem[] = useMemo(() => {
     if (!rulesSnapshot) return [];
     return rulesSnapshot.localRules.map((rule: AgentRule) => ({
-      identity: ruleIdentity(rule),
+      identity: assetIdentity(rule),
       name: rule.name,
       scope: rule.scope,
       agent: rule.agent,
@@ -158,7 +157,7 @@ export function DigitalAssetsDialog({
   const memoriesLocalItems: LocalAssetItem[] = useMemo(() => {
     if (!memoriesSnapshot) return [];
     return memoriesSnapshot.localMemories.map((memory: AgentMemory) => ({
-      identity: memoryIdentity(memory),
+      identity: assetIdentity(memory),
       name: memory.name,
       scope: memory.scope,
       agent: memory.agent,

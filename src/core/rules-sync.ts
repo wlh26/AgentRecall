@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { assetIdentity } from "./asset-identity";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -127,9 +128,7 @@ function readRuleFile(filePath: string, agent: RulesAgent, scope: RulesScope, na
 // ---------------------------------------------------------------------------
 
 export function ruleIdentity(rule: Pick<AgentRule, "agent" | "scope" | "name" | "projectPath">): string {
-  return rule.scope === "project"
-    ? `${rule.agent}:${rule.scope}:${rule.projectPath}:${rule.name}`
-    : `${rule.agent}:${rule.scope}:${rule.name}`;
+  return assetIdentity(rule);
 }
 
 // ---------------------------------------------------------------------------

@@ -69,8 +69,9 @@ describe("digital assets panel", () => {
     expect(stylesheet).toContain(".asset-sync-icon");
   });
 
-  it("uses ruleIdentity and memoryIdentity for stable asset matching", () => {
-    expect(dialogSource).toContain("ruleIdentity");
-    expect(dialogSource).toContain("memoryIdentity");
+  it("uses browser-safe assetIdentity for stable asset matching", () => {
+    expect(dialogSource).toContain("assetIdentity");
+    expect(dialogSource).not.toContain("import { ruleIdentity }");
+    expect(dialogSource).not.toContain("import { memoryIdentity }");
   });
 });
