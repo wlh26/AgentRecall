@@ -73,6 +73,7 @@ import { SessionStore, type TraceEventQueryOptions } from "../core/session-store
 import { buildCombinedSupabaseSetupSql, supabaseSqlEditorUrl } from "../core/supabase-setup";
 import { buildSshArgs, readUserSshConfig } from "../core/ssh-config";
 import { listWslDistributions } from "../core/wsl";
+import { deleteWslSessionFile } from "../core/wsl-session-actions";
 import { AUTO_INDEX_REFRESH_INTERVAL_MS, INITIAL_INDEX_DELAY_MS } from "../core/refresh-policy";
 import { globalShortcutLabel, normalizeGlobalShortcut } from "../core/shortcuts";
 import { isLocalSessionEnvironment } from "../core/session-environment";
@@ -1477,7 +1478,12 @@ function registerIpc(): void {
   ipcMain.handle("favorite:set", (_event, sessionKey: string, favorited: boolean) => store.setFavorited(sessionKey, favorited));
   ipcMain.handle("pin:set", (_event, sessionKey: string, pinned: boolean) => store.setPinned(sessionKey, pinned));
   ipcMain.handle("hide:set", (_event, sessionKey: string, hidden: boolean) => store.setHidden(sessionKey, hidden));
-  ipcMain.handle("session:delete", (_event, sessionKey: string) => store.deleteSession(sessionKey));
+  ipcMain.handle("session:delete", async (_event, sessionKey: string) => {
+    const session = store.getSession(sessionKey);
+    if (!session || session.environmentKind !== "wsl") return store.deleteSession(sessionKey);
+    await deleteWslSessionFile(requireWslEnvironment(session), session.filePath);
+    return store.deleteSessionRecord(sessionKey);
+  });
   ipcMain.handle("index:refresh", () => runIndexSync());
   ipcMain.handle("index:status", () => indexStatus);
   registerAppUpdateIpc(ipcMain, appUpdateService);

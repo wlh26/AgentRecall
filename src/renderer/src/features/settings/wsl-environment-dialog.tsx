@@ -63,7 +63,7 @@ export function WslEnvironmentDialog({
       setLocalError(null);
       await onSaveEnvironment({
         kind: "wsl",
-        label: `WSL · ${distribution}`,
+        label: distribution,
         wslDistribution: distribution,
         enabled: true,
       });

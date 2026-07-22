@@ -188,6 +188,14 @@ describe("detail panel actions", () => {
     expect(lastGroup).not.toContain("onReveal");
   });
 
+  it("deletes WSL source files remotely before removing the local record", () => {
+    const handler = mainHandlerSource("session:delete");
+    expect(handler).toContain('session.environmentKind !== "wsl"');
+    expect(handler).toContain("await deleteWslSessionFile(requireWslEnvironment(session), session.filePath)");
+    expect(handler).toContain("return store.deleteSessionRecord(sessionKey)");
+    expect(handler).toContain("return store.deleteSession(sessionKey)");
+  });
+
   it("exposes remote environment management IPC through preload and main", () => {
     for (const channel of [
       "environments:list",
