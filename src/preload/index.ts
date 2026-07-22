@@ -22,6 +22,7 @@ import type {
   SessionSearchResult,
   SessionStats,
   SessionStatsOptions,
+  SessionStatsTrend,
   SessionTraceEvent,
   TagListOptions,
   UsageQuotaSnapshot,
@@ -60,6 +61,7 @@ const api = {
     return () => ipcRenderer.removeListener("summary:progress", listener);
   },
   getStats: (options?: SessionStatsOptions): Promise<SessionStats> => ipcRenderer.invoke("stats:get", options),
+  getStatsTrend: (options?: SessionStatsOptions): Promise<SessionStatsTrend> => ipcRenderer.invoke("stats:trend", options),
   getMcpStatus: (): Promise<boolean> => ipcRenderer.invoke("mcp:status"),
   setMcpEnabled: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke("mcp:set-enabled", enabled),
   getQuotas: (): Promise<UsageQuotaSnapshot> => ipcRenderer.invoke("quota:get"),

@@ -282,10 +282,24 @@ export interface SessionSourceStats extends SessionStatsSummary {
 }
 
 export type SessionStatsPeriod = "today" | "sevenDay" | "thirtyDay" | "allTime";
+export type SessionStatsTrendGranularity = "day" | "week" | "month";
 
 export interface SessionStatsOptions {
   period?: SessionStatsPeriod;
   excludeSubagents?: boolean;
+}
+
+export interface SessionStatsTrendBucket {
+  start: number;
+  end: number;
+  label: string;
+  totalTokens: number;
+}
+
+export interface SessionStatsTrend {
+  period: SessionStatsPeriod;
+  granularity: SessionStatsTrendGranularity | null;
+  buckets: SessionStatsTrendBucket[];
 }
 
 export interface SessionStats {

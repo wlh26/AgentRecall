@@ -68,6 +68,7 @@ import type {
   SessionSortBy,
   SessionStats,
   SessionStatsPeriod,
+  SessionStatsTrend,
   SessionTraceEvent,
   UsageQuotaCard,
   UsageQuotaSnapshot,
@@ -232,6 +233,12 @@ const EMPTY_STATS: SessionStats = {
   previousTotal: null,
 };
 
+const EMPTY_STATS_TREND: SessionStatsTrend = {
+  period: "today",
+  granularity: null,
+  buckets: [],
+};
+
 const EMPTY_QUOTAS: UsageQuotaSnapshot = {
   generatedAt: "",
   providers: [],
@@ -324,8 +331,10 @@ export function App(): ReactElement {
   const [projectTags, setProjectTags] = useState<ProjectTagEntry[]>([]);
   const [environments, setEnvironments] = useState<SessionEnvironment[]>([]);
   const [stats, setStats] = useState<SessionStats>(EMPTY_STATS);
+  const [statsTrend, setStatsTrend] = useState<SessionStatsTrend>(EMPTY_STATS_TREND);
   const [statsPeriod, setStatsPeriod] = useState<SessionStatsPeriod>("today");
   const [statsRefreshing, setStatsRefreshing] = useState(false);
+  const [statsTrendLoading, setStatsTrendLoading] = useState(false);
   const [statsFeedback, setStatsFeedback] = useState<StatsFeedback>(null);
   const [quotas, setQuotas] = useState<UsageQuotaSnapshot>(EMPTY_QUOTAS);
   const [quotaLoading, setQuotaLoading] = useState(false);
@@ -390,6 +399,7 @@ export function App(): ReactElement {
   const loadSeqRef = useRef(0);
   const metadataLoadSeqRef = useRef(0);
   const statsLoadSeqRef = useRef(0);
+  const statsTrendLoadSeqRef = useRef(0);
   const detailLoadSeqRef = useRef(0);
   const remoteSessionsLoadSeqRef = useRef(0);
   const remoteSessionsLoadPromiseRef = useRef<Promise<void> | null>(null);
@@ -463,9 +473,21 @@ export function App(): ReactElement {
 
   const loadStats = useCallback(async () => {
     const requestId = ++statsLoadSeqRef.current;
-    const nextStats = await window.sessionSearch.getStats({ period: statsPeriod });
-    if (requestId !== statsLoadSeqRef.current) return;
-    setStats(nextStats);
+    const trendRequestId = ++statsTrendLoadSeqRef.current;
+    setStatsTrendLoading(statsPeriod !== "allTime");
+    try {
+      const [nextStats, nextTrend] = await Promise.all([
+        window.sessionSearch.getStats({ period: statsPeriod }),
+        statsPeriod === "allTime"
+          ? Promise.resolve<SessionStatsTrend>({ period: statsPeriod, granularity: null, buckets: [] })
+          : window.sessionSearch.getStatsTrend({ period: statsPeriod }).catch(() => ({ period: statsPeriod, granularity: null, buckets: [] })),
+      ]);
+      if (requestId !== statsLoadSeqRef.current) return;
+      setStats(nextStats);
+      if (trendRequestId === statsTrendLoadSeqRef.current) setStatsTrend(nextTrend);
+    } finally {
+      if (trendRequestId === statsTrendLoadSeqRef.current) setStatsTrendLoading(false);
+    }
   }, [statsPeriod]);
 
   const refreshStats = useCallback(async () => {
@@ -1832,12 +1854,13 @@ export function App(): ReactElement {
               {t("Messages", "消息")}
             </span>
             {hasTokenUsage(stats.total) ? (
-              <span>
+              <span className={statsPeriod === "allTime" ? "" : "stats-token-metric"} tabIndex={statsPeriod === "allTime" ? undefined : 0}>
                 <span className="stats-metric-value">
                   <strong>{formatTokenCount(stats.total.totalTokens)}</strong>
                   <UsageDeltaBadge delta={usageDelta(stats.total.totalTokens, stats.previousTotal?.totalTokens ?? null)} />
                 </span>
                 {t("Tokens", "Token")}
+                <UsageTokenTrendPopover trend={statsTrend} loading={statsTrendLoading} period={statsPeriod} language={language} />
               </span>
             ) : null}
           </div>
@@ -2610,6 +2633,73 @@ export function App(): ReactElement {
         />
       ) : null}
     </main>
+  );
+}
+
+function UsageTokenTrendPopover({
+  trend,
+  loading,
+  period,
+  language,
+}: {
+  trend: SessionStatsTrend;
+  loading: boolean;
+  period: SessionStatsPeriod;
+  language: LanguageMode;
+}): ReactElement | null {
+  if (period === "allTime") return null;
+  const title =
+    period === "today"
+      ? localize(language, "Last 30 days", "近 30 天")
+      : period === "sevenDay"
+        ? localize(language, "Last 30 weeks", "近 30 周")
+        : localize(language, "Last 30 months", "近 30 个月");
+  const buckets = trend.buckets;
+  const width = 220;
+  const height = 96;
+  const chartLeft = 36;
+  const chartRight = 8;
+  const chartTop = 8;
+  const chartBottom = 22;
+  const plotWidth = width - chartLeft - chartRight;
+  const plotHeight = height - chartTop - chartBottom;
+  const maxTokens = Math.max(...buckets.map((bucket) => bucket.totalTokens), 0);
+  const yMax = Math.max(maxTokens, 1);
+  const points = buckets.map((bucket, index) => {
+    const x = buckets.length <= 1 ? chartLeft + plotWidth / 2 : chartLeft + (index * plotWidth) / (buckets.length - 1);
+    const y = chartTop + (1 - bucket.totalTokens / yMax) * plotHeight;
+    return { x, y, bucket };
+  });
+  const pathData = points.map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
+  const latest = buckets.at(-1);
+
+  return (
+    <div className="stats-token-popover" role="tooltip">
+      <div className="stats-token-popover-header">
+        <span>{title}</span>
+        {latest ? <em>{formatTokenCount(latest.totalTokens)}</em> : null}
+      </div>
+      {loading ? (
+        <div className="stats-token-popover-empty">{localize(language, "Loading trend...", "正在加载趋势...")}</div>
+      ) : buckets.length === 0 ? (
+        <div className="stats-token-popover-empty">{localize(language, "No token usage yet", "暂无 Token 用量")}</div>
+      ) : (
+        <>
+          <svg className="stats-token-chart" viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
+            <path className="stats-token-chart-grid" d={`M${chartLeft} ${chartTop}H${width - chartRight}M${chartLeft} ${chartTop + plotHeight / 2}H${width - chartRight}`} />
+            <path className="stats-token-chart-axis" d={`M${chartLeft} ${chartTop}V${height - chartBottom}H${width - chartRight}`} />
+            <text className="stats-token-chart-y-label" x={chartLeft - 6} y={chartTop + 3} textAnchor="end">{formatCompactNumber(yMax)}</text>
+            <text className="stats-token-chart-y-label" x={chartLeft - 6} y={height - chartBottom + 3} textAnchor="end">0</text>
+            <text className="stats-token-chart-x-label" x={chartLeft} y={height - 5} textAnchor="start">{buckets[0]?.label}</text>
+            <text className="stats-token-chart-x-label" x={width - chartRight} y={height - 5} textAnchor="end">{latest?.label}</text>
+            <path className="stats-token-chart-line" d={pathData} />
+            {points.map((point) => (
+              <circle key={point.bucket.start} className="stats-token-chart-point" cx={point.x} cy={point.y} r="2" />
+            ))}
+          </svg>
+        </>
+      )}
+    </div>
   );
 }
 

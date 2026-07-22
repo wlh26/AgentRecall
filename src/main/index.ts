@@ -1395,6 +1395,7 @@ function registerIpc(): void {
     return setup.status();
   });
   ipcMain.handle("stats:get", (_event, options?: SessionStatsOptions) => store.getStats(visibleStatsOptions(options)));
+  ipcMain.handle("stats:trend", (_event, options?: SessionStatsOptions) => store.getStatsTrend(visibleStatsOptions(options)));
   ipcMain.handle("quota:get", () => {
     const settings = getSettings();
     return loadUsageQuotaSnapshot({

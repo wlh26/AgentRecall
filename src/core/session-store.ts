@@ -41,6 +41,7 @@ import type {
   SessionSource,
   SessionStats,
   SessionStatsOptions,
+  SessionStatsTrend,
   SessionTraceEvent,
   TagListOptions,
   TokenUsageEvent,
@@ -310,6 +311,10 @@ export class SessionStore {
 
   getStats(options: SessionStatsOptions = {}, now = Date.now()): SessionStats {
     return this.sessions.getStats(options, now);
+  }
+
+  getStatsTrend(options: SessionStatsOptions = {}, now = Date.now()): SessionStatsTrend {
+    return this.sessions.getStatsTrend(options, now);
   }
 
   searchSessions(options: SearchOptions = {}): SessionSearchResult[] {

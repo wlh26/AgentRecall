@@ -290,6 +290,7 @@ select:focus-visible {
 /* ============================================================ SIDEBAR */
 .sidebar {
   position: relative;
+  z-index: 9;
   display: flex;
   min-width: 0;
   height: calc(100vh - 40px);
@@ -401,6 +402,8 @@ select:focus-visible {
 }
 
 .stats-panel {
+  position: relative;
+  z-index: 5;
   display: grid;
   gap: 7px;
   padding: 8px 9px 9px;
@@ -506,6 +509,129 @@ select:focus-visible {
 .stats-metrics > span {
   display: grid;
   gap: 2px;
+  color: var(--text-muted);
+  font-size: 10.5px;
+}
+
+.stats-token-metric {
+  position: relative;
+  z-index: 1;
+  border-radius: 7px;
+  outline: none;
+}
+
+.stats-token-metric:hover,
+.stats-token-metric:focus-visible {
+  z-index: 2147483646;
+  color: var(--text);
+}
+
+.stats-token-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 2147483647;
+  box-sizing: border-box;
+  display: none;
+  width: 216px;
+  padding: 9px 10px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--panel-bg);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+  color: var(--text);
+  text-transform: none;
+}
+
+.stats-token-metric:hover .stats-token-popover,
+.stats-token-metric:focus-visible .stats-token-popover,
+.stats-token-metric:focus-within .stats-token-popover {
+  display: grid;
+  gap: 7px;
+}
+
+.stats-token-popover::after {
+  content: "";
+  position: absolute;
+  right: 30px;
+  top: -6px;
+  width: 10px;
+  height: 10px;
+  border-left: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--panel-bg);
+  transform: rotate(45deg);
+}
+
+.stats-token-popover-header,
+.stats-token-popover-axis {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+}
+
+.stats-token-popover-header span {
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.stats-token-popover-header em {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.stats-token-chart {
+  width: 100%;
+  height: 96px;
+  overflow: visible;
+}
+
+.stats-token-chart-grid {
+  fill: none;
+  stroke: var(--border-subtle);
+  stroke-dasharray: 3 3;
+  stroke-width: 1;
+}
+
+.stats-token-chart-axis {
+  fill: none;
+  stroke: var(--text-faint);
+  stroke-width: 1.1;
+}
+
+.stats-token-chart-x-label,
+.stats-token-chart-y-label {
+  fill: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 8.5px;
+}
+
+.stats-token-chart-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.stats-token-chart-point {
+  fill: var(--accent);
+}
+
+.stats-token-popover-axis {
+  color: var(--text-faint);
+  font-family: var(--mono);
+}
+
+.stats-token-popover-empty {
+  min-height: 64px;
+  display: grid;
+  place-items: center;
   color: var(--text-muted);
   font-size: 10.5px;
 }

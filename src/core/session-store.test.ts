@@ -12,6 +12,7 @@ import type {
   SessionMessage,
   SessionMigrationRecord,
   SessionTraceEvent,
+  TokenUsageEvent,
 } from "./types";
 
 const require = createRequire(import.meta.url);
@@ -384,6 +385,67 @@ describe("SessionStore", () => {
       isSubagent: true,
       parentSessionId: "root",
     });
+    store.close();
+  });
+
+  it("aggregates token trends by day, trims leading zero buckets, and dedupes events", () => {
+    const store = createInMemoryStore();
+    const event = (iso: string, totalTokens: number, dedupeKey = iso): TokenUsageEvent => ({
+      timestamp: new Date(iso).getTime(),
+      dedupeKey,
+      inputTokens: totalTokens,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      reasoningOutputTokens: 0,
+      totalTokens,
+    });
+    store.upsertIndexedSession(
+      sampleSession({ sessionKey: "codex:trend", rawId: "trend", timestamp: new Date("2026-07-01T12:00:00Z").getTime() }),
+      messages,
+      [event("2026-07-02T12:00:00Z", 100, "shared"), event("2026-07-22T12:00:00Z", 25, "latest")],
+    );
+    store.upsertIndexedSession(
+      sampleSession({ sessionKey: "claude:trend", rawId: "trend", source: "claude-cli", timestamp: new Date("2026-07-01T12:00:00Z").getTime() }),
+      messages,
+      [event("2026-07-02T12:10:00Z", 50, "shared")],
+    );
+
+    const trend = store.getStatsTrend({ period: "today" }, new Date("2026-07-22T18:00:00Z").getTime());
+
+    expect(trend.granularity).toBe("day");
+    expect(trend.buckets[0].label).toBe("07-02");
+    expect(trend.buckets[0].totalTokens).toBe(100);
+    expect(trend.buckets.some((bucket) => bucket.totalTokens === 25)).toBe(true);
+    store.close();
+  });
+
+  it("aggregates token trends by week and month and omits all-time trends", () => {
+    const store = createInMemoryStore();
+    const event = (iso: string, totalTokens: number): TokenUsageEvent => ({
+      timestamp: new Date(iso).getTime(),
+      dedupeKey: iso,
+      inputTokens: totalTokens,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      reasoningOutputTokens: 0,
+      totalTokens,
+    });
+    store.upsertIndexedSession(
+      sampleSession({ sessionKey: "codex:trend-periods", rawId: "trend-periods" }),
+      messages,
+      [event("2026-02-03T12:00:00Z", 40), event("2026-07-08T12:00:00Z", 60)],
+    );
+
+    const weekly = store.getStatsTrend({ period: "sevenDay" }, new Date("2026-07-22T18:00:00Z").getTime());
+    const monthly = store.getStatsTrend({ period: "thirtyDay" }, new Date("2026-07-22T18:00:00Z").getTime());
+    const allTime = store.getStatsTrend({ period: "allTime" }, new Date("2026-07-22T18:00:00Z").getTime());
+
+    expect(weekly.granularity).toBe("week");
+    expect(weekly.buckets.some((bucket) => bucket.totalTokens === 60)).toBe(true);
+    expect(monthly.granularity).toBe("month");
+    expect(monthly.buckets[0]).toMatchObject({ label: "2026-02", totalTokens: 40 });
+    expect(monthly.buckets.at(-1)).toMatchObject({ label: "2026-07", totalTokens: 60 });
+    expect(allTime).toEqual({ period: "allTime", granularity: null, buckets: [] });
     store.close();
   });
 

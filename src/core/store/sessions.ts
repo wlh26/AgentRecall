@@ -20,6 +20,9 @@ import type {
   SessionStatsOptions,
   SessionStatsPeriod,
   SessionStatsSummary,
+  SessionStatsTrend,
+  SessionStatsTrendBucket,
+  SessionStatsTrendGranularity,
   SessionTraceEvent,
   TagListOptions,
   TokenUsage,
@@ -47,6 +50,13 @@ interface StatsRange {
   period: SessionStatsPeriod;
   since: number | null;
   until: number;
+}
+
+interface StatsTrendWindow {
+  since: number;
+  until: number;
+  granularity: SessionStatsTrendGranularity;
+  buckets: SessionStatsTrendBucket[];
 }
 
 interface SessionRow {
@@ -1011,6 +1021,27 @@ export class SessionsStore {
     };
   }
 
+  getStatsTrend(options: SessionStatsOptions = {}, now = Date.now()): SessionStatsTrend {
+    const period = options.period ?? "today";
+    const window = resolveStatsTrendWindow(period, now);
+    if (!window) return { period, granularity: null, buckets: [] };
+
+    const buckets = window.buckets.map((bucket) => ({ ...bucket, totalTokens: 0 }));
+    const bucketByStart = new Map(buckets.map((bucket) => [bucket.start, bucket]));
+
+    for (const row of this.aggregateTokenEventsForTrend(window.since, window.until, window.granularity, options.excludeSubagents ?? false)) {
+      const bucket = bucketByStart.get(row.bucket_start);
+      if (bucket) bucket.totalTokens = row.total_tokens;
+    }
+
+    const firstNonZero = buckets.findIndex((bucket) => bucket.totalTokens > 0);
+    return {
+      period,
+      granularity: window.granularity,
+      buckets: firstNonZero === -1 ? [] : buckets.slice(firstNonZero),
+    };
+  }
+
   private aggregateStatsForRange(
     range: StatsRange,
     excludeSubagents: boolean,
@@ -1357,6 +1388,55 @@ export class SessionsStore {
       reasoning_output_tokens: number;
       total_tokens: number;
     }>;
+  }
+
+  private aggregateTokenEventsForTrend(
+    since: number,
+    until: number,
+    granularity: SessionStatsTrendGranularity,
+    excludeSubagents: boolean,
+  ): Array<{ bucket_start: number; total_tokens: number }> {
+    const subagentAnd = excludeSubagents ? "AND sessions.is_subagent = 0" : "";
+    const rows = this.db
+      .prepare(
+        `
+        WITH ranked AS (
+          SELECT
+            token_events.dedupe_key AS dedupe_key,
+            token_events.timestamp AS timestamp,
+            token_events.total_tokens AS total_tokens,
+            ROW_NUMBER() OVER (
+              PARTITION BY token_events.dedupe_key
+              ORDER BY
+                token_events.total_tokens DESC,
+                CASE sessions.source
+                  WHEN 'codex-cli' THEN 1
+                  WHEN 'claude-cli' THEN 1
+                  WHEN 'codex-app' THEN 2
+                  WHEN 'claude-app' THEN 2
+                  ELSE 9
+                END,
+                token_events.timestamp ASC
+            ) AS row_rank
+          FROM token_events
+          JOIN sessions ON sessions.session_key = token_events.session_key
+          WHERE token_events.timestamp >= ? AND token_events.timestamp <= ? ${subagentAnd}
+        )
+        SELECT timestamp, total_tokens
+        FROM ranked
+        WHERE row_rank = 1
+      `,
+      )
+      .all(since, until) as Array<{ timestamp: number; total_tokens: number }>;
+
+    const totals = new Map<number, number>();
+    for (const row of rows) {
+      const bucketStart = startOfTrendBucket(row.timestamp, granularity);
+      totals.set(bucketStart, (totals.get(bucketStart) ?? 0) + row.total_tokens);
+    }
+    return [...totals.entries()]
+      .map(([bucket_start, total_tokens]) => ({ bucket_start, total_tokens }))
+      .sort((a, b) => a.bucket_start - b.bucket_start);
   }
 
   private aggregateSessionTokensBySource(excludeSubagents: boolean): Array<{
@@ -1847,6 +1927,54 @@ function startOfLocalDay(timestamp: number): number {
   const date = new Date(timestamp);
   date.setHours(0, 0, 0, 0);
   return date.getTime();
+}
+
+function resolveStatsTrendWindow(period: SessionStatsPeriod, now: number): StatsTrendWindow | null {
+  if (period === "allTime") return null;
+  const granularity: SessionStatsTrendGranularity = period === "today" ? "day" : period === "sevenDay" ? "week" : "month";
+  const currentStart = startOfTrendBucket(now, granularity);
+  const firstStart = addTrendBuckets(currentStart, granularity, -29);
+  const buckets: SessionStatsTrendBucket[] = [];
+  for (let index = 0; index < 30; index += 1) {
+    const start = addTrendBuckets(firstStart, granularity, index);
+    const nextStart = addTrendBuckets(start, granularity, 1);
+    buckets.push({
+      start,
+      end: nextStart - 1,
+      label: formatTrendBucketLabel(start, granularity),
+      totalTokens: 0,
+    });
+  }
+  return { since: buckets[0]?.start ?? currentStart, until: now, granularity, buckets };
+}
+
+function startOfTrendBucket(timestamp: number, granularity: SessionStatsTrendGranularity): number {
+  const date = new Date(timestamp);
+  date.setHours(0, 0, 0, 0);
+  if (granularity === "week") {
+    const day = date.getDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    date.setDate(date.getDate() + mondayOffset);
+  } else if (granularity === "month") {
+    date.setDate(1);
+  }
+  return date.getTime();
+}
+
+function addTrendBuckets(timestamp: number, granularity: SessionStatsTrendGranularity, amount: number): number {
+  const date = new Date(timestamp);
+  if (granularity === "day") date.setDate(date.getDate() + amount);
+  else if (granularity === "week") date.setDate(date.getDate() + amount * 7);
+  else date.setMonth(date.getMonth() + amount);
+  return date.getTime();
+}
+
+function formatTrendBucketLabel(timestamp: number, granularity: SessionStatsTrendGranularity): string {
+  const date = new Date(timestamp);
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  if (granularity === "month") return `${date.getFullYear()}-${month}`;
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${month}-${day}`;
 }
 
 function buildFtsQuery(query: string): string {
