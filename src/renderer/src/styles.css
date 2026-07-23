@@ -516,8 +516,8 @@ select:focus-visible {
   outline: none;
 }
 
-.stats-token-metric:hover,
-.stats-token-metric:focus-visible {
+.stats-token-metric--interactive:hover,
+.stats-token-metric--interactive:focus-visible {
   color: var(--text);
 }
 

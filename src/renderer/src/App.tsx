@@ -2807,7 +2807,7 @@ function UsageTokenMetric({
   return (
     <div
       ref={anchorRef}
-      className={interactive ? "stats-token-metric" : undefined}
+      className={interactive ? "stats-token-metric stats-token-metric--interactive" : "stats-token-metric"}
       tabIndex={interactive ? 0 : undefined}
       onMouseEnter={openPopover}
       onMouseLeave={scheduleClose}
