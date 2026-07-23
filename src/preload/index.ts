@@ -25,9 +25,9 @@ import type {
   SessionStatsTrend,
   SessionTraceEvent,
   TagListOptions,
-  UsageQuotaSnapshot,
 } from "../core/types";
 import { createAppUpdateApi } from "./app-update";
+import { createQuotaApi } from "./quota";
 import { createProvidersApi } from "./providers";
 import { createRemoteSessionsApi } from "./remote-sessions";
 import { createMemoriesApi } from "./memories";
@@ -64,7 +64,7 @@ const api = {
   getStatsTrend: (options?: SessionStatsOptions): Promise<SessionStatsTrend> => ipcRenderer.invoke("stats:trend", options),
   getMcpStatus: (): Promise<boolean> => ipcRenderer.invoke("mcp:status"),
   setMcpEnabled: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke("mcp:set-enabled", enabled),
-  getQuotas: (): Promise<UsageQuotaSnapshot> => ipcRenderer.invoke("quota:get"),
+  ...createQuotaApi(ipcRenderer),
   listTags: (options?: TagListOptions): Promise<string[]> => ipcRenderer.invoke("tags:list", options),
   listProjects: (options?: ProjectQueryOptions): Promise<ProjectSummary[]> => ipcRenderer.invoke("projects:list", options),
   listTagsByProject: (): Promise<ProjectTagEntry[]> => ipcRenderer.invoke("tags:by-project"),

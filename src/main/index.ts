@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
+import { homedir } from "node:os";
 import { loadActiveCodexSummaryEndpointDefaults } from "../core/codex-profile";
 import {
   reconstructCodexResponsesRequest,
@@ -91,7 +92,9 @@ import { isLocalSessionEnvironment, isLocalSessionStorage } from "../core/sessio
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../core/session-sources";
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
+import { QUOTA_EVENTS } from "../shared/ipc/quota";
 import { registerAppUpdateIpc } from "./ipc/app-update";
+import { registerQuotaIpc } from "./ipc/quota";
 import { registerProvidersIpc } from "./ipc/providers";
 import { registerRemoteSessionsIpc } from "./ipc/remote-sessions";
 import { registerMemoriesIpc, type MemoriesIpcService } from "./ipc/memories";
@@ -104,6 +107,13 @@ import {
   type AppUpdateClient,
 } from "./services/app-update-service";
 import { ProviderService } from "./services/provider-service";
+import {
+  codexAuthPath,
+  createQuotaCache,
+  QuotaService,
+  readCodexAuthIdentity,
+  watchQuotaAuthFile,
+} from "./services/quota-service";
 import {
   RemoteSessionService,
   type SessionSyncHookSetup,
@@ -208,6 +218,7 @@ let autoIndexTimer: ReturnType<typeof setInterval> | null = null;
 let registeredGlobalShortcut: string | null = null;
 let remoteWatchManager: RemoteWatchManager | null = null;
 let remoteEnvironmentLifecycle: RemoteEnvironmentLifecycle | null = null;
+let quotaService: QuotaService;
 const remoteDetailLoads = new Map<string, Promise<void>>();
 
 const settingsStore = new Store<AppSettings>({
@@ -234,6 +245,28 @@ function getSettings(): AppSettings {
     globalShortcut: normalizeGlobalShortcut(settings.globalShortcut),
     defaultTerminal: normalizeTerminal(settings.defaultTerminal),
   };
+}
+
+function createQuotaService(): QuotaService {
+  const authFile = codexAuthPath(process.env, homedir());
+  const cache = createQuotaCache(path.join(app.getPath("userData"), "quota-cache.json"));
+  return new QuotaService({
+    load: (settings) => loadUsageQuotaSnapshot(settings),
+    getSettings: () => {
+      const settings = getSettings();
+      return {
+        hideCodexQuota: settings.hideCodexQuota,
+        hideClaudeQuota: settings.hideClaudeQuota,
+      };
+    },
+    authPath: () => authFile,
+    identity: readCodexAuthIdentity,
+    ...cache,
+    publish: (snapshot) => mainWindow?.webContents.send(QUOTA_EVENTS.updated, snapshot),
+    delay: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
+    now: () => Date.now(),
+    watch: watchQuotaAuthFile,
+  });
 }
 
 const appUpdateService = new AppUpdateService({
@@ -1486,13 +1519,6 @@ function registerIpc(): void {
   });
   ipcMain.handle("stats:get", (_event, options?: SessionStatsOptions) => store.getStats(visibleStatsOptions(options)));
   ipcMain.handle("stats:trend", (_event, options?: SessionStatsOptions) => store.getStatsTrend(visibleStatsOptions(options)));
-  ipcMain.handle("quota:get", () => {
-    const settings = getSettings();
-    return loadUsageQuotaSnapshot({
-      hideCodexQuota: settings.hideCodexQuota,
-      hideClaudeQuota: settings.hideClaudeQuota,
-    });
-  });
   ipcMain.handle("tags:list", (_event, options?: TagListOptions) =>
     store.listTags({ ...visibleProjectOptions(), ...options }),
   );
@@ -1541,6 +1567,7 @@ function registerIpc(): void {
   ipcMain.handle("index:refresh", () => runIndexSync());
   ipcMain.handle("index:status", () => indexStatus);
   registerAppUpdateIpc(ipcMain, appUpdateService);
+  registerQuotaIpc(ipcMain, quotaService);
   ipcMain.handle("settings:get", () => providerService.hydrateSettings());
   registerProvidersIpc(ipcMain, providerService);
   ipcMain.handle("settings:set", async (_event, settings: AppSettingsUpdate) => {
@@ -1733,6 +1760,7 @@ app.whenReady().then(() => {
   void appUpdateService.registerRunningProcess();
   const dbPath = path.join(app.getPath("userData"), "session-search.sqlite");
   store = new SessionStore(dbPath);
+  quotaService = createQuotaService();
   // Publish the live database path so the standalone MCP server can find it.
   try {
     writeDbPointer(dbPath);
@@ -1747,6 +1775,7 @@ app.whenReady().then(() => {
   providerService.migrateLegacyKeys();
   pruneDisabledOptionalSources(getSettings());
   registerIpc();
+  quotaService.start();
   createApplicationMenu();
   createWindow();
   createTray();
@@ -1777,6 +1806,7 @@ app.on("before-quit", () => {
   stopAutoIndexRefresh();
   skillService.stopUsageRefresh();
   remoteSessionService.stopQueue();
+  quotaService?.stop();
   remoteEnvironmentLifecycle?.stopAll();
   void providerService.stopCodexChatProxy();
   globalShortcut.unregisterAll();

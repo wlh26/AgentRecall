@@ -515,7 +515,7 @@ export function App(): ReactElement {
     if (!background) setQuotaLoading(true);
     if (mode === "manual") setQuotaFeedback({ kind: "running", message: t("Refreshing usage limits...", "正在刷新额度...") });
     try {
-      const nextQuotas = await window.sessionSearch.getQuotas();
+      const nextQuotas = await window.sessionSearch.getQuotas(mode === "manual");
       setQuotas(nextQuotas);
       if (mode === "manual") {
         const successMessage = t("Usage limits refreshed.", "额度已刷新。");
@@ -807,7 +807,11 @@ export function App(): ReactElement {
   useEffect(() => {
     void loadQuotas();
     const timer = window.setInterval(() => void loadQuotas("background"), QUOTA_REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(timer);
+    const unsubscribe = window.sessionSearch.onQuotaUpdated((snapshot) => setQuotas(snapshot));
+    return () => {
+      window.clearInterval(timer);
+      unsubscribe();
+    };
   }, [loadQuotas]);
 
   useEffect(() => {
@@ -2818,6 +2822,19 @@ function QuotaPanel({
               </div>
             ) : null}
           </div>
+          {snapshot.freshness === "stale" ? (
+            <div className="quota-stale-notice">
+              {l(
+                `Showing data from ${formatRelativeTime(Date.parse(snapshot.lastSuccessfulAt ?? ""))}. Refresh failed.`,
+                `正在显示 ${formatRelativeTime(Date.parse(snapshot.lastSuccessfulAt ?? ""))} 的数据，刷新失败。`,
+              )}
+            </div>
+          ) : null}
+          {snapshot.freshness === "auth-required" ? (
+            <div className="quota-stale-notice error">
+              {l("Codex login expired. Sign in again to refresh usage limits.", "Codex 登录已失效，请重新登录后刷新额度。")}
+            </div>
+          ) : null}
           {feedback ? <div className={`quota-feedback ${feedback.kind}`}>{feedback.message}</div> : null}
         </>
       ) : null}

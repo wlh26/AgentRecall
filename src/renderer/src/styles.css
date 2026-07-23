@@ -939,8 +939,19 @@ select:focus-visible {
 }
 
 .quota-empty,
-.quota-feedback {
+.quota-feedback,
+.quota-stale-notice {
   padding: 0 8px;
+}
+
+.quota-stale-notice {
+  color: var(--warning-text, #9a6700);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.quota-stale-notice.error {
+  color: var(--danger);
 }
 
 .quota-feedback.running {
