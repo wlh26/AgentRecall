@@ -683,7 +683,6 @@ export class SupabaseRemoteSessionClient {
       await Promise.all([
         this.deleteStorageObject(payload.detail_object_key).catch(() => undefined),
         this.deleteStorageObject(payload.portable_object_key).catch(() => undefined),
-        ...attachmentObjects.map((attachment) => this.deleteStorageObject(attachment.objectKey).catch(() => undefined)),
       ]);
       throw error;
     }

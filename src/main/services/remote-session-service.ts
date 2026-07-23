@@ -246,6 +246,7 @@ export class RemoteSessionService {
 
   async listSyncItems(): Promise<SessionSyncItem[]> {
     const store = this.dependencies.getStore();
+    const includeAttachments = this.dependencies.getSettings().syncSessionAttachments;
     const remotes = (await this.createClient().listRemoteSessions())
       .filter((remote) => store.getSession(remote.sourceSessionKey)?.isSubagent !== true);
     const locals: Array<{ session: SessionSearchResult; revision: string }> = [];
@@ -261,6 +262,7 @@ export class RemoteSessionService {
           session.sessionKey,
           0,
           store.getSessionSyncBindingForLocalKey(session.sessionKey)?.remoteSessionId,
+          includeAttachments,
         );
         locals.push({ session: hydrated, revision: built.payload.content_hash });
       } catch (error) {

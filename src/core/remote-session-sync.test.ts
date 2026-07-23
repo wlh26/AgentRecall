@@ -411,6 +411,66 @@ describe("remote session sync model", () => {
     expect(storageWrites).toBe(0);
   });
 
+  it("does not delete an existing attachment when a remote update fails", async () => {
+    const attachmentKey = `sessions/${remoteSessionId(SESSION.sessionKey)}/attachments/abc-shot.png`;
+    const previousDetail = {
+      ...buildRemoteSessionSnapshot(SESSION, [{
+        ...MESSAGES[0],
+        attachments: [{
+          id: "0-0-image",
+          fileName: "shot.png",
+          mimeType: "image/png",
+          previewKind: "image" as const,
+          status: "available" as const,
+          remoteObjectKey: attachmentKey,
+          sha256: "abc",
+        }],
+      }], [], 10_000),
+      schemaVersion: 2 as const,
+    };
+    const { payload, detailJson, portableJson } = buildRemoteSessionPayload({
+      session: SESSION,
+      detail: previousDetail,
+      portable: PORTABLE,
+      now: 11_000,
+    });
+    const existing = {
+      ...payload,
+      content_hash: "previous-revision",
+      detail_object_key: `sessions/${payload.id}/previous.detail.json`,
+      detail_sha256: "unused-by-fixture",
+    };
+    const deletedKeys: string[] = [];
+    const client = new SupabaseRemoteSessionClient({
+      url: "https://example.supabase.co",
+      anonKey: "anon",
+      fetchImpl: async (url, init) => {
+        const requestUrl = String(url);
+        const method = init?.method ?? "GET";
+        if (requestUrl.includes("/rest/v1/")) {
+          if (method === "POST") {
+            return new Response(JSON.stringify({ message: "database unavailable" }), { status: 503 });
+          }
+          return new Response(JSON.stringify([existing]), { status: 200 });
+        }
+        const objectKey = decodeURIComponent(requestUrl.split("/agent-session-remote/")[1] ?? "");
+        if (method === "GET") return new Response(JSON.stringify(previousDetail), { status: 200 });
+        if (method === "DELETE") deletedKeys.push(objectKey);
+        return new Response("{}", { status: 200 });
+      },
+    });
+
+    await expect(client.uploadSession(payload, detailJson, portableJson, [{
+      objectKey: attachmentKey,
+      bytes: Buffer.from("image"),
+      mimeType: "image/png",
+    }])).rejects.toThrow("database unavailable");
+
+    expect(deletedKeys).not.toContain(attachmentKey);
+    expect(deletedKeys).toContain(payload.detail_object_key);
+    expect(deletedKeys).toContain(payload.portable_object_key);
+  });
+
   it("falls back to legacy remote session rows when source environment columns are missing", async () => {
     const detail = buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000);
     const { payload, detailJson, portableJson } = buildRemoteSessionPayload({ session: SESSION, detail, portable: PORTABLE, now: 11_000 });
