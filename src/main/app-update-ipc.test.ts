@@ -1,6 +1,6 @@
 import type { IpcMainInvokeEvent, IpcRendererEvent } from "electron";
 import { describe, expect, it, vi } from "vitest";
-import type { AppUpdateStatus } from "../core/app-update-types";
+import type { AppUpdateProgress, AppUpdateStatus } from "../core/app-update-types";
 import { createAppUpdateApi } from "../preload/app-update";
 import { APP_UPDATE_EVENTS, APP_UPDATE_IPC } from "../shared/ipc/app-update";
 import { IpcInputError } from "../shared/ipc/contract";
@@ -105,12 +105,12 @@ describe("application update IPC", () => {
 
   it("builds the existing preload API from the same channel contracts", async () => {
     const invoke = vi.fn(async () => undefined);
-    const listeners = new Map<string, (event: IpcRendererEvent, status: AppUpdateStatus) => void>();
+    const listeners = new Map<string, (event: IpcRendererEvent, value: never) => void>();
     const removeListener = vi.fn((channel: string) => listeners.delete(channel));
     const renderer = {
       invoke,
-      on(channel: string, listener: (event: IpcRendererEvent, status: AppUpdateStatus) => void) {
-        listeners.set(channel, listener);
+      on(channel: string, listener: (event: IpcRendererEvent, value: unknown) => void) {
+        listeners.set(channel, listener as (event: IpcRendererEvent, value: never) => void);
         return renderer;
       },
       removeListener,
@@ -134,9 +134,17 @@ describe("application update IPC", () => {
     const callback = vi.fn();
     const unsubscribe = api.onAppUpdateStatus(callback);
     const status = updateStatus({ updateAvailable: true });
-    listeners.get(APP_UPDATE_EVENTS.status)?.({} as IpcRendererEvent, status);
+    listeners.get(APP_UPDATE_EVENTS.status)?.({} as IpcRendererEvent, status as never);
     expect(callback).toHaveBeenCalledWith(status);
     unsubscribe();
     expect(removeListener).toHaveBeenCalledWith(APP_UPDATE_EVENTS.status, expect.any(Function));
+
+    const progressCallback = vi.fn();
+    const unsubscribeProgress = api.onAppUpdateProgress(progressCallback);
+    const progress: AppUpdateProgress = { phase: "downloading", version: "0.2.0", percent: 50 };
+    listeners.get(APP_UPDATE_EVENTS.progress)?.({} as IpcRendererEvent, progress as never);
+    expect(progressCallback).toHaveBeenCalledWith(progress);
+    unsubscribeProgress();
+    expect(removeListener).toHaveBeenCalledWith(APP_UPDATE_EVENTS.progress, expect.any(Function));
   });
 });
