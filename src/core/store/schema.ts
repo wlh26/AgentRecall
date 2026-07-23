@@ -15,6 +15,7 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
       raw_id TEXT NOT NULL,
       source TEXT NOT NULL,
       environment_id TEXT NOT NULL DEFAULT 'local',
+      storage_environment_id TEXT NOT NULL DEFAULT 'local',
       project_path TEXT NOT NULL,
       file_path TEXT NOT NULL,
       original_title TEXT NOT NULL,
@@ -67,6 +68,21 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
       content TEXT NOT NULL,
       timestamp TEXT NOT NULL,
       PRIMARY KEY (session_key, message_index),
+      FOREIGN KEY (session_key) REFERENCES sessions(session_key) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS message_attachments (
+      session_key TEXT NOT NULL,
+      message_index INTEGER NOT NULL,
+      attachment_id TEXT NOT NULL,
+      attachment_index INTEGER NOT NULL,
+      file_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size_bytes INTEGER,
+      preview_kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      cache_path TEXT,
+      PRIMARY KEY (session_key, message_index, attachment_id),
       FOREIGN KEY (session_key) REFERENCES sessions(session_key) ON DELETE CASCADE
     );
 
@@ -223,6 +239,8 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
       ON token_events(timestamp);
     CREATE INDEX IF NOT EXISTS idx_message_events_timestamp
       ON message_events(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_message_attachments_session_message
+      ON message_attachments(session_key, message_index, attachment_index);
     CREATE INDEX IF NOT EXISTS idx_token_events_dedupe
       ON token_events(dedupe_key, total_tokens, timestamp);
     CREATE INDEX IF NOT EXISTS idx_trace_events_session
@@ -245,6 +263,7 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
   addColumnIfMissing(db, "sessions", "reasoning_output_tokens", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "sessions", "total_tokens", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "sessions", "environment_id", "TEXT NOT NULL DEFAULT 'local'");
+  addColumnIfMissing(db, "sessions", "storage_environment_id", "TEXT NOT NULL DEFAULT 'local'");
   addColumnIfMissing(db, "sessions", "ai_summary", "TEXT");
   addColumnIfMissing(db, "sessions", "ai_summary_model", "TEXT");
   addColumnIfMissing(db, "sessions", "ai_summary_at", "INTEGER");
@@ -260,9 +279,11 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
       )
       .run();
   }
+  runSessionStorageEnvironmentMigration(db);
   runCodexDesktopOriginatorMigration(db);
   runCodeBuddyTokenEventsMigration(db);
   runCursorComposerMetadataMigration(db);
+  runCursorRuntimeEnvironmentMigration(db);
   addColumnIfMissing(db, "skill_sync_bindings", "remote_version", "INTEGER NOT NULL DEFAULT 1");
   addColumnIfMissing(db, "skill_sync_bindings", "portable_identity", "TEXT NOT NULL DEFAULT ''");
   addColumnIfMissing(db, "skill_sync_bindings", "last_content_hash", "TEXT NOT NULL DEFAULT ''");
@@ -276,6 +297,8 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
       ON sessions(environment_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_environment_source
       ON sessions(environment_id, source);
+    CREATE INDEX IF NOT EXISTS idx_sessions_storage_environment
+      ON sessions(storage_environment_id);
     DROP INDEX IF EXISTS idx_session_migrations_source_session_key;
     DROP INDEX IF EXISTS idx_session_migrations_created_at_desc;
   `);
@@ -289,6 +312,22 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
   `);
   upgradeFtsTokenizer(db);
   ensureLocalEnvironment(db);
+}
+
+function runSessionStorageEnvironmentMigration(db: SessionStoreDatabase): void {
+  const migrationId = "session-storage-environment-v1";
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const applied = db.prepare("SELECT 1 FROM data_migrations WHERE id = ?").get(migrationId);
+    if (!applied) {
+      db.prepare("UPDATE sessions SET storage_environment_id = environment_id").run();
+      db.prepare("INSERT INTO data_migrations (id, applied_at) VALUES (?, ?)").run(migrationId, Date.now());
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 function runCodexDesktopOriginatorMigration(db: SessionStoreDatabase): void {
@@ -330,6 +369,35 @@ function runCursorComposerMetadataMigration(db: SessionStoreDatabase): void {
     const applied = db.prepare("SELECT 1 FROM data_migrations WHERE id = ?").get(migrationId);
     if (!applied) {
       db.prepare("UPDATE sessions SET file_mtime_ms = 0 WHERE source = 'cursor-agent' AND environment_id = 'local'").run();
+      db.prepare("INSERT INTO data_migrations (id, applied_at) VALUES (?, ?)").run(migrationId, Date.now());
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function runCursorRuntimeEnvironmentMigration(db: SessionStoreDatabase): void {
+  const migrationId = "cursor-runtime-environment-v1";
+  const emptyCursorSessionWhere = `
+    source = 'cursor-agent'
+    AND message_count = 0
+    AND trim(project_path) = ''
+    AND trim(first_question) = ''
+    AND original_title = raw_id
+  `;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const applied = db.prepare("SELECT 1 FROM data_migrations WHERE id = ?").get(migrationId);
+    if (!applied) {
+      db.prepare(
+        `DELETE FROM session_fts WHERE session_key IN (SELECT session_key FROM sessions WHERE ${emptyCursorSessionWhere})`,
+      ).run();
+      db.prepare(`DELETE FROM sessions WHERE ${emptyCursorSessionWhere}`).run();
+      db.prepare(
+        "UPDATE sessions SET file_mtime_ms = 0 WHERE source = 'cursor-agent' AND storage_environment_id = 'local'",
+      ).run();
       db.prepare("INSERT INTO data_migrations (id, applied_at) VALUES (?, ?)").run(migrationId, Date.now());
     }
     db.exec("COMMIT");

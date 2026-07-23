@@ -51,10 +51,59 @@ const {
   showNativeUpdateFailure,
   skipUpdateVersion,
   snoozeUpdatePrompt,
+  stageUpdate,
   stopRunningApp,
   waitForUpdateCompletion,
   updateLockPath,
 } = require("../bin/update-client.cjs");
+
+test("streams package bytes and reports monotonic download progress while staging", async () => {
+  const bytes = Buffer.from("0123456789");
+  const value = manifest();
+  value.package.sha256 = createHash("sha256").update(bytes).digest("hex");
+  const directory = await temporaryDirectory("agent-recall-update-stage-");
+  const stageRoot = path.join(directory, "stage");
+  const packagePath = path.join(directory, "live", "agent-recall");
+  const progress = [];
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes.subarray(0, 5));
+      controller.enqueue(bytes.subarray(5));
+      controller.close();
+    },
+  });
+
+  const staged = await stageUpdate(value, {
+    fetchImpl: async () => new Response(stream, {
+      status: 200,
+      headers: { "content-length": String(bytes.length) },
+    }),
+    stageRoot,
+    packagePath,
+    statusPath: path.join(directory, "status.json"),
+    execFileImpl: async (_command, _args, options) => {
+      const installed = path.join(options.env.AGENT_RECALL_STAGE_ROOT, "node_modules", "agent-recall");
+      await mkdir(path.join(installed, "dist", "main"), { recursive: true });
+      await mkdir(path.join(installed, "bin"), { recursive: true });
+      await writeFile(path.join(installed, "package.json"), JSON.stringify({ name: "agent-recall", version: value.version }), "utf8");
+      await writeFile(path.join(installed, "dist", "main", "index.js"), "", "utf8");
+      await writeFile(path.join(installed, "bin", "agent-recall.cjs"), "", "utf8");
+      return { stdout: "", stderr: "" };
+    },
+    ensureElectronImpl: async () => undefined,
+    onProgress: (event) => progress.push(event),
+  });
+
+  assert.equal(staged.stagedPackagePath, path.join(stageRoot, "node_modules", "agent-recall"));
+  assert.deepEqual(
+    progress.filter((event) => event.phase === "downloading").map((event) => event.percent),
+    [50, 100],
+  );
+  assert.deepEqual(
+    progress.map((event) => event.phase),
+    ["downloading", "downloading", "verifying", "staging", "validating"],
+  );
+});
 
 test("allows enough time for a normal GitHub release check", () => {
   assert.equal(UPDATE_REQUEST_TIMEOUT_MS, 5_000);

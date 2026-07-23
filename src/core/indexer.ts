@@ -45,6 +45,7 @@ export interface BatchIndexOptions {
   batchSize?: number;
   loadOptions?: SessionLoadOptions;
   onProgress?: (status: IndexStatus) => void;
+  onEnvironmentsChanged?: () => void;
   yieldToEventLoop?: () => Promise<void>;
 }
 
@@ -59,8 +60,20 @@ export async function syncLoadedSessionsInBatches(
   let skipped = 0;
   let total = 0;
   let pendingInBatch = 0;
+  const sshEnvironmentByHostAlias = new Map(
+    store
+      .listEnvironments()
+      .filter((environment) => environment.kind === "ssh" && environment.hostAlias)
+      .map((environment) => [environment.hostAlias!, environment]),
+  );
 
-  for (const item of loaded) {
+  for (const loadedItem of loaded) {
+    const item = resolveExecutionEnvironment(
+      store,
+      loadedItem,
+      sshEnvironmentByHostAlias,
+      options.onEnvironmentsChanged,
+    );
     if (store.isIndexedSessionFresh(item.session)) {
       store.touchIndexedAtIfMissing(item.session.sessionKey);
       skipped++;
@@ -90,6 +103,39 @@ export async function syncLoadedSessionsInBatches(
     total,
     lastIndexedAt: Date.now(),
     error: null,
+  };
+}
+
+function resolveExecutionEnvironment(
+  store: SessionStore,
+  item: LoadedSession,
+  sshEnvironmentByHostAlias: Map<string, ReturnType<SessionStore["listEnvironments"]>[number]>,
+  onEnvironmentsChanged?: () => void,
+): LoadedSession {
+  const hint = item.executionEnvironmentHint;
+  if (!hint) return item;
+
+  let environment = sshEnvironmentByHostAlias.get(hint.hostAlias);
+  if (!environment) {
+    environment = store.upsertEnvironment({
+      kind: "ssh",
+      label: hint.label,
+      hostAlias: hint.hostAlias,
+      enabled: false,
+    });
+    sshEnvironmentByHostAlias.set(hint.hostAlias, environment);
+    onEnvironmentsChanged?.();
+  }
+
+  return {
+    ...item,
+    session: {
+      ...item.session,
+      environmentId: environment.id,
+      environmentKind: environment.kind,
+      environmentLabel: environment.label,
+      storageEnvironmentId: item.session.storageEnvironmentId ?? "local",
+    },
   };
 }
 
@@ -124,11 +170,9 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
     ...options,
     onProgress: (status) => options.onProgress?.({ ...status, skipped: status.skipped + fileSkipped, total: status.total + fileSkipped }),
   }).then((status) => {
-    // Prune sessions whose source files no longer exist on disk. Only applies to
-    // the local environment — remote sessions are synced independently and their
-    // file paths are not local filesystem paths. scannedFilePaths is collected
-    // from shouldSkipFile (file-based sources) and from yielded LoadedSessions
-    // (DB-backed sources like Hermes/OpenCode whose file_path is the DB path).
+    // Prune sessions whose source files no longer exist in local storage. Sessions
+    // stored remotely are synced independently and their paths are not local
+    // filesystem paths. scannedFilePaths covers file-based and DB-backed sources.
     for (const staleKey of store.listSessionKeysByFilePath("local", scannedFilePaths)) {
       store.deleteSessionRecord(staleKey);
     }

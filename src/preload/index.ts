@@ -25,9 +25,9 @@ import type {
   SessionStatsTrend,
   SessionTraceEvent,
   TagListOptions,
-  UsageQuotaSnapshot,
 } from "../core/types";
 import { createAppUpdateApi } from "./app-update";
+import { createQuotaApi } from "./quota";
 import { createProvidersApi } from "./providers";
 import { createRemoteSessionsApi } from "./remote-sessions";
 import { createMemoriesApi } from "./memories";
@@ -48,6 +48,13 @@ const api = {
   getSession: (sessionKey: string): Promise<SessionSearchResult | null> => ipcRenderer.invoke("session:get", sessionKey),
   getMessages: (sessionKey: string, offset?: number, limit?: number): Promise<SessionMessage[]> =>
     ipcRenderer.invoke("session:messages", sessionKey, offset, limit),
+  previewAttachment: (
+    sessionKey: string,
+    attachmentId: string,
+  ): Promise<{ kind: "image" | "text" | "external"; data?: string }> =>
+    ipcRenderer.invoke("attachment:preview", sessionKey, attachmentId),
+  openAttachment: (sessionKey: string, attachmentId: string): Promise<void> =>
+    ipcRenderer.invoke("attachment:open", sessionKey, attachmentId),
   getTraceEvents: (sessionKey: string, options?: TraceEventQueryOptions): Promise<SessionTraceEvent[]> =>
     ipcRenderer.invoke("session:trace-events", sessionKey, options),
   getLiveSessions: (): Promise<LiveSessionSnapshot> => ipcRenderer.invoke("sessions:live"),
@@ -64,7 +71,7 @@ const api = {
   getStatsTrend: (options?: SessionStatsOptions): Promise<SessionStatsTrend> => ipcRenderer.invoke("stats:trend", options),
   getMcpStatus: (): Promise<boolean> => ipcRenderer.invoke("mcp:status"),
   setMcpEnabled: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke("mcp:set-enabled", enabled),
-  getQuotas: (): Promise<UsageQuotaSnapshot> => ipcRenderer.invoke("quota:get"),
+  ...createQuotaApi(ipcRenderer),
   listTags: (options?: TagListOptions): Promise<string[]> => ipcRenderer.invoke("tags:list", options),
   listProjects: (options?: ProjectQueryOptions): Promise<ProjectSummary[]> => ipcRenderer.invoke("projects:list", options),
   listTagsByProject: (): Promise<ProjectTagEntry[]> => ipcRenderer.invoke("tags:by-project"),
@@ -131,6 +138,13 @@ const api = {
     const listener = () => callback();
     ipcRenderer.on("focus-search", listener);
     return () => ipcRenderer.removeListener("focus-search", listener);
+  },
+  openQuickSearchSession: (sessionKey: string): Promise<void> =>
+    ipcRenderer.invoke("quick-search:open-session", sessionKey),
+  onOpenSession: (callback: (sessionKey: string) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, sessionKey: string) => callback(sessionKey);
+    ipcRenderer.on("open-session", listener);
+    return () => ipcRenderer.removeListener("open-session", listener);
   },
   onOpenSettings: (callback: () => void): (() => void) => {
     const listener = () => callback();

@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
+import { homedir } from "node:os";
 import { loadActiveCodexSummaryEndpointDefaults } from "../core/codex-profile";
 import {
   reconstructCodexResponsesRequest,
@@ -87,11 +88,13 @@ import { listWslDistributions } from "../core/wsl";
 import { deleteWslSessionFile } from "../core/wsl-session-actions";
 import { AUTO_INDEX_REFRESH_INTERVAL_MS, INITIAL_INDEX_DELAY_MS } from "../core/refresh-policy";
 import { globalShortcutLabel, normalizeGlobalShortcut } from "../core/shortcuts";
-import { isLocalSessionEnvironment } from "../core/session-environment";
+import { isLocalSessionEnvironment, isLocalSessionStorage } from "../core/session-environment";
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../core/session-sources";
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
+import { QUOTA_EVENTS } from "../shared/ipc/quota";
 import { registerAppUpdateIpc } from "./ipc/app-update";
+import { registerQuotaIpc } from "./ipc/quota";
 import { registerProvidersIpc } from "./ipc/providers";
 import { registerRemoteSessionsIpc } from "./ipc/remote-sessions";
 import { registerMemoriesIpc, type MemoriesIpcService } from "./ipc/memories";
@@ -104,6 +107,13 @@ import {
   type AppUpdateClient,
 } from "./services/app-update-service";
 import { ProviderService } from "./services/provider-service";
+import {
+  codexAuthPath,
+  createQuotaCache,
+  QuotaService,
+  readCodexAuthIdentity,
+  watchQuotaAuthFile,
+} from "./services/quota-service";
 import {
   RemoteSessionService,
   type SessionSyncHookSetup,
@@ -200,6 +210,7 @@ app.setAppUserModelId("dev.zszz3.agent-recall");
 migrateLegacyUserData();
 
 let mainWindow: BrowserWindow | null = null;
+let quickSearchWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let store: SessionStore;
 let indexStatus: IndexStatus = { running: false, indexed: 0, skipped: 0, total: 0, lastIndexedAt: null, error: null };
@@ -208,6 +219,7 @@ let autoIndexTimer: ReturnType<typeof setInterval> | null = null;
 let registeredGlobalShortcut: string | null = null;
 let remoteWatchManager: RemoteWatchManager | null = null;
 let remoteEnvironmentLifecycle: RemoteEnvironmentLifecycle | null = null;
+let quotaService: QuotaService;
 const remoteDetailLoads = new Map<string, Promise<void>>();
 
 const settingsStore = new Store<AppSettings>({
@@ -236,13 +248,40 @@ function getSettings(): AppSettings {
   };
 }
 
+function createQuotaService(): QuotaService {
+  const authFile = codexAuthPath(process.env, homedir());
+  const cache = createQuotaCache(path.join(app.getPath("userData"), "quota-cache.json"));
+  return new QuotaService({
+    load: (settings) => loadUsageQuotaSnapshot(settings),
+    getSettings: () => {
+      const settings = getSettings();
+      return {
+        hideCodexQuota: settings.hideCodexQuota,
+        hideClaudeQuota: settings.hideClaudeQuota,
+      };
+    },
+    authPath: () => authFile,
+    identity: readCodexAuthIdentity,
+    ...cache,
+    publish: (snapshot) => mainWindow?.webContents.send(QUOTA_EVENTS.updated, snapshot),
+    delay: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
+    now: () => Date.now(),
+    watch: watchQuotaAuthFile,
+  });
+}
+
 const appUpdateService = new AppUpdateService({
   getClient: loadUpdateClient,
   releaseRuntime: releaseUpdateRuntime,
   getAutoCheckEnabled: () => getSettings().autoCheckUpdates,
   autoCheckDisabled: () => process.env.AGENT_RECALL_NO_UPDATE_CHECK === "1",
   publishStatus: (status) => mainWindow?.webContents.send(APP_UPDATE_EVENTS.status, status),
-  launchInstaller: (manifest) => launchDetachedAppUpdateInstaller(manifest, { applyUpdatePath: APPLY_UPDATE_PATH }),
+  publishProgress: (progress) => mainWindow?.webContents.send(APP_UPDATE_EVENTS.progress, progress),
+  stageInstaller: (manifest, onProgress) => loadUpdateClient().stageUpdate(manifest, {
+    nodePath: process.env.AGENT_RECALL_NODE_PATH,
+    onProgress,
+  }),
+  launchInstaller: (staged) => launchDetachedAppUpdateInstaller(staged, { applyUpdatePath: APPLY_UPDATE_PATH }),
   requestQuit: () => app.quit(),
   schedule: (callback, delayMs) => setTimeout(callback, delayMs),
   showMessageBox: (options) => mainWindow
@@ -503,7 +542,7 @@ function hasHydratedRemoteDetails(sessionKey: string): boolean {
 
 async function ensureRemoteSessionDetailsLoaded(sessionKey: string): Promise<void> {
   const session = store.getSession(sessionKey);
-  if (!session || isLocalSessionEnvironment(session)) return;
+  if (!session || isLocalSessionStorage(session)) return;
   if (hasHydratedRemoteDetails(sessionKey)) return;
 
   const active = remoteDetailLoads.get(sessionKey);
@@ -511,7 +550,7 @@ async function ensureRemoteSessionDetailsLoaded(sessionKey: string): Promise<voi
 
   const load = (async () => {
     const latest = store.getSession(sessionKey);
-    if (!latest || isLocalSessionEnvironment(latest)) return;
+    if (!latest || isLocalSessionStorage(latest)) return;
     if (latest.source === "codewiz-cli") return;
     const environment = store.getEnvironment(latest.environmentId);
     if (environment?.kind === "wsl") {
@@ -690,6 +729,62 @@ function createWindow(): void {
   }
 }
 
+function createQuickSearchWindow(): BrowserWindow {
+  const preloadPath = path.join(__dirname, "../preload/index.mjs");
+  const window = new BrowserWindow({
+    width: 560,
+    height: 430,
+    minWidth: 560,
+    minHeight: 430,
+    maxWidth: 560,
+    maxHeight: 430,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    skipTaskbar: true,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      preload: preloadPath,
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  window.webContents.on("will-navigate", (event) => event.preventDefault());
+  window.on("blur", () => window.hide());
+  window.on("closed", () => {
+    if (quickSearchWindow === window) quickSearchWindow = null;
+  });
+  if (process.env.ELECTRON_RENDERER_URL) {
+    void window.loadURL(new URL("quick-search.html", process.env.ELECTRON_RENDERER_URL).toString());
+  } else {
+    void window.loadFile(path.join(__dirname, "../renderer/quick-search.html"));
+  }
+  return window;
+}
+
+function showQuickSearch(): void {
+  if (!quickSearchWindow || quickSearchWindow.isDestroyed()) {
+    quickSearchWindow = createQuickSearchWindow();
+  }
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const bounds = quickSearchWindow.getBounds();
+  quickSearchWindow.setPosition(
+    Math.round(display.workArea.x + (display.workArea.width - bounds.width) / 2),
+    Math.round(display.workArea.y + Math.min(72, display.workArea.height * 0.08)),
+  );
+  quickSearchWindow.show();
+  quickSearchWindow.focus();
+}
+
+function applyDockVisibility(showInDock: boolean): void {
+  if (process.platform !== "darwin" || !app.dock) return;
+  if (showInDock) app.dock.show();
+  else app.dock.hide();
+}
+
 async function ensureWslResumePreflight(session: SessionSearchResult): Promise<void> {
   const environment = requireWslEnvironment(session);
   const report = await preflightRemoteSessionResume(environment, session);
@@ -760,6 +855,7 @@ function createTray(): void {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: `Open ${PRODUCT_NAME}`, click: showWindow },
+      { label: "快速搜索会话…", click: showQuickSearch },
       { label: "Refresh Now", click: () => void runIndexSync() },
       { type: "separator" },
       { label: "Quit", click: () => app.quit() },
@@ -921,6 +1017,7 @@ async function runIndexSync(): Promise<IndexStatus> {
       includeTrae: settings.includeTrae,
       includeQoder: settings.includeQoder,
     },
+    onEnvironmentsChanged: emitEnvironmentsUpdated,
     onProgress: (status) => {
       indexStatus = { ...status, lastIndexedAt: indexStatus.lastIndexedAt };
       mainWindow?.webContents.send("index-status", indexStatus);
@@ -1310,7 +1407,7 @@ function registerIpc(): void {
     const pageOffset = offset ?? 0;
     const pageLimit = limit ?? 120;
     const session = store.getSession(sessionKey);
-    if (session && !isLocalSessionEnvironment(session) && !hasHydratedRemoteDetails(sessionKey)) {
+    if (session && !isLocalSessionStorage(session) && !hasHydratedRemoteDetails(sessionKey)) {
       if (session.messageCount <= 0) return [];
       const environment = session.environmentKind === "wsl"
         ? requireWslEnvironment(session)
@@ -1321,9 +1418,30 @@ function registerIpc(): void {
     await ensureRemoteSessionDetailsLoaded(sessionKey);
     return store.getMessages(sessionKey, pageOffset, pageLimit);
   });
+  ipcMain.handle("attachment:preview", async (_event, sessionKey: string, attachmentId: string) => {
+    const attachment = store.getAttachmentFile(sessionKey, attachmentId);
+    if (!attachment) throw new Error("Attachment is unavailable.");
+    if (attachment.previewKind === "image") {
+      const bytes = await fs.readFile(attachment.cachePath);
+      return { kind: "image", data: `data:${attachment.mimeType};base64,${bytes.toString("base64")}` };
+    }
+    if (attachment.previewKind === "text") {
+      const text = await fs.readFile(attachment.cachePath, "utf8");
+      return { kind: "text", data: text.slice(0, 256 * 1024) };
+    }
+    const error = await shell.openPath(attachment.cachePath);
+    if (error) throw new Error(error);
+    return { kind: "external" };
+  });
+  ipcMain.handle("attachment:open", async (_event, sessionKey: string, attachmentId: string) => {
+    const attachment = store.getAttachmentFile(sessionKey, attachmentId);
+    if (!attachment) throw new Error("Attachment is unavailable.");
+    const error = await shell.openPath(attachment.cachePath);
+    if (error) throw new Error(error);
+  });
   ipcMain.handle("session:trace-events", async (_event, sessionKey: string, options?: TraceEventQueryOptions) => {
     const session = store.getSession(sessionKey);
-    if (session && !isLocalSessionEnvironment(session) && !hasHydratedRemoteDetails(sessionKey)) return [];
+    if (session && !isLocalSessionStorage(session) && !hasHydratedRemoteDetails(sessionKey)) return [];
     await ensureRemoteSessionDetailsLoaded(sessionKey);
     return store.getTraceEvents(sessionKey, options);
   });
@@ -1485,13 +1603,6 @@ function registerIpc(): void {
   });
   ipcMain.handle("stats:get", (_event, options?: SessionStatsOptions) => store.getStats(visibleStatsOptions(options)));
   ipcMain.handle("stats:trend", (_event, options?: SessionStatsOptions) => store.getStatsTrend(visibleStatsOptions(options)));
-  ipcMain.handle("quota:get", () => {
-    const settings = getSettings();
-    return loadUsageQuotaSnapshot({
-      hideCodexQuota: settings.hideCodexQuota,
-      hideClaudeQuota: settings.hideClaudeQuota,
-    });
-  });
   ipcMain.handle("tags:list", (_event, options?: TagListOptions) =>
     store.listTags({ ...visibleProjectOptions(), ...options }),
   );
@@ -1539,7 +1650,16 @@ function registerIpc(): void {
   });
   ipcMain.handle("index:refresh", () => runIndexSync());
   ipcMain.handle("index:status", () => indexStatus);
+  ipcMain.handle("quick-search:open-session", (_event, sessionKey: string) => {
+    const session = store.getSession(sessionKey);
+    if (!session) throw new Error("Session was not found.");
+    store.markOpened(sessionKey);
+    quickSearchWindow?.hide();
+    showWindow();
+    mainWindow?.webContents.send("open-session", sessionKey);
+  });
   registerAppUpdateIpc(ipcMain, appUpdateService);
+  registerQuotaIpc(ipcMain, quotaService);
   ipcMain.handle("settings:get", () => providerService.hydrateSettings());
   registerProvidersIpc(ipcMain, providerService);
   ipcMain.handle("settings:set", async (_event, settings: AppSettingsUpdate) => {
@@ -1556,6 +1676,7 @@ function registerIpc(): void {
     providerService.persistKeysFromUpdate(settings, next);
     settingsStore.set(providerService.removeStoredKeys(next));
     if ("autoCheckUpdates" in settings) await appUpdateService.setAutoCheckEnabled(next.autoCheckUpdates);
+    if ("showInDock" in settings) applyDockVisibility(next.showInDock);
     pruneDisabledOptionalSources(next);
     return providerService.addStoredKeys(next);
   });
@@ -1732,6 +1853,7 @@ app.whenReady().then(() => {
   void appUpdateService.registerRunningProcess();
   const dbPath = path.join(app.getPath("userData"), "session-search.sqlite");
   store = new SessionStore(dbPath);
+  quotaService = createQuotaService();
   // Publish the live database path so the standalone MCP server can find it.
   try {
     writeDbPointer(dbPath);
@@ -1746,9 +1868,11 @@ app.whenReady().then(() => {
   providerService.migrateLegacyKeys();
   pruneDisabledOptionalSources(getSettings());
   registerIpc();
+  quotaService.start();
   createApplicationMenu();
   createWindow();
   createTray();
+  applyDockVisibility(getSettings().showInDock);
   void appUpdateService.showPreviousUpdateResult();
   const shortcut = getSettings().globalShortcut;
   if (!registerAppGlobalShortcut(shortcut)) {
@@ -1776,6 +1900,7 @@ app.on("before-quit", () => {
   stopAutoIndexRefresh();
   skillService.stopUsageRefresh();
   remoteSessionService.stopQueue();
+  quotaService?.stop();
   remoteEnvironmentLifecycle?.stopAll();
   void providerService.stopCodexChatProxy();
   globalShortcut.unregisterAll();

@@ -416,6 +416,22 @@ describe("RemoteSessionService cloud orchestration", () => {
     );
   });
 
+  it("uses the attachment sync setting when comparing local and cloud revisions", async () => {
+    const settings = configuredSettings();
+    settings.syncSessionAttachments = false;
+    const harness = createHarness({ settings });
+
+    await harness.service.listSyncItems();
+
+    expect(harness.buildUpload).toHaveBeenCalledWith(
+      harness.store,
+      "local:session-1",
+      0,
+      undefined,
+      false,
+    );
+  });
+
   it("records a restore binding after the restored session appears in the local index", async () => {
     const restored = localSession({ sessionKey: "local:restored", rawId: "restored-session" });
     const harness = createHarness({

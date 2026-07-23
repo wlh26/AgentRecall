@@ -288,6 +288,19 @@ describe("detail panel actions", () => {
     expect(mainSource).toContain("await ensureRemoteSessionDetailsLoaded(sessionKey)");
   });
 
+  it("keeps locally stored Cursor Remote details local and refreshes discovered environments", () => {
+    const detailLoader = mainSource.slice(
+      mainSource.indexOf("async function ensureRemoteSessionDetailsLoaded"),
+      mainSource.indexOf("async function chooseMarkdownExportPath"),
+    );
+    const messagesHandler = mainHandlerSource("session:messages");
+    const traceHandler = mainHandlerSource("session:trace-events");
+    expect(detailLoader).toContain("isLocalSessionStorage(session)");
+    expect(messagesHandler).toContain("!isLocalSessionStorage(session)");
+    expect(traceHandler).toContain("!isLocalSessionStorage(session)");
+    expect(mainSource).toContain("onEnvironmentsChanged: emitEnvironmentsUpdated");
+  });
+
   it("does not hydrate remote session details before building resume commands", () => {
     for (const channel of ["command:copy-resume", "command:resume", "command:resume-iterm"]) {
       const handler = mainHandlerSource(channel);

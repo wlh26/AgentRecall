@@ -94,6 +94,7 @@ export interface AppSettings {
   hideClaudeQuota: boolean;
   hideSubagentSessions: boolean;
   autoCheckUpdates: boolean;
+  showInDock: boolean;
   summaryAutoBackfill: boolean;
   summaryMaxAgeDays: number;
   compressionConcurrency: number;
@@ -103,6 +104,7 @@ export interface AppSettings {
   skillSyncSupabaseUrl: string;
   skillSyncSupabaseAnonKey: string;
   remoteSyncEnabled: boolean;
+  syncSessionAttachments: boolean;
   remoteSyncSupabaseUrl: string;
   remoteSyncSupabaseAnonKey: string;
   apiConfig: ApiConfig;
@@ -154,6 +156,7 @@ export const defaultSettings: AppSettings = {
   hideClaudeQuota: false,
   hideSubagentSessions: true,
   autoCheckUpdates: true,
+  showInDock: true,
   summaryAutoBackfill: false,
   summaryMaxAgeDays: 30,
   compressionConcurrency: 8,
@@ -163,6 +166,7 @@ export const defaultSettings: AppSettings = {
   skillSyncSupabaseUrl: "",
   skillSyncSupabaseAnonKey: "",
   remoteSyncEnabled: false,
+  syncSessionAttachments: true,
   remoteSyncSupabaseUrl: "",
   remoteSyncSupabaseAnonKey: "",
   apiConfig: defaultApiConfig,
@@ -179,11 +183,13 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     summaryMaxAgeDays: normalizeSummaryMaxAgeDays(merged.summaryMaxAgeDays),
     compressionConcurrency: normalizeCompressionConcurrency(merged.compressionConcurrency),
     autoCheckUpdates: Boolean(merged.autoCheckUpdates),
+    showInDock: merged.showInDock !== false,
     summarySource: merged.summarySource === "claude" || merged.summarySource === "custom" ? merged.summarySource : "codex",
     skillSyncEnabled: Boolean(merged.skillSyncEnabled),
     skillSyncSupabaseUrl: normalizeSupabaseSettingUrl(merged.skillSyncSupabaseUrl),
     skillSyncSupabaseAnonKey: String(merged.skillSyncSupabaseAnonKey ?? "").trim(),
     remoteSyncEnabled: Boolean(merged.remoteSyncEnabled),
+    syncSessionAttachments: merged.syncSessionAttachments !== false,
     remoteSyncSupabaseUrl: normalizeSupabaseSettingUrl(merged.remoteSyncSupabaseUrl),
     remoteSyncSupabaseAnonKey: String(merged.remoteSyncSupabaseAnonKey ?? "").trim(),
     apiConfig: normalizeApiConfig({ ...previous.apiConfig, ...(updates.apiConfig ?? {}) }),

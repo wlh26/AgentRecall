@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { resolveSearchScope } from "./features/search/search-scope";
-import { existingSshHostAliases } from "./features/settings/ssh-environment-dialog";
+import {
+  disabledSshEnvironmentIdsByHostAlias,
+  existingSshHostAliases,
+} from "./features/settings/ssh-environment-dialog";
 
 describe("resolveSearchScope", () => {
   it("marks explicit environment and another environment's selected project as incompatible", () => {
@@ -21,14 +24,20 @@ describe("resolveSearchScope", () => {
 });
 
 describe("existingSshHostAliases", () => {
-  it("returns only actual aliases already represented by SSH environments", () => {
+  const environments = [
+    { id: "local", kind: "local" as const, label: "Local", hostAlias: null, enabled: true },
+    { id: "devbox", kind: "ssh" as const, label: "devbox", hostAlias: "devbox", enabled: true },
+    { id: "cursor-dev", kind: "ssh" as const, label: "dev", hostAlias: "dev", enabled: false },
+    { id: "prod", kind: "ssh" as const, label: "prod", hostAlias: null, enabled: true },
+  ];
+
+  it("blocks enabled aliases while leaving disabled discovered aliases selectable", () => {
     expect(
-      existingSshHostAliases([
-        { kind: "local", label: "Local", hostAlias: null },
-        { kind: "ssh", label: "devbox", hostAlias: "devbox" },
-        { kind: "ssh", label: "prod", hostAlias: null },
-        { kind: "ssh", label: "local", hostAlias: null },
-      ]),
+      existingSshHostAliases(environments),
     ).toEqual(new Set(["devbox"]));
+  });
+
+  it("maps disabled SSH aliases to the environment ids that should be upgraded", () => {
+    expect(disabledSshEnvironmentIdsByHostAlias(environments)).toEqual(new Map([["dev", "cursor-dev"]]));
   });
 });

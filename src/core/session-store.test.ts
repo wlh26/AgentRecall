@@ -552,6 +552,40 @@ describe("SessionStore", () => {
     expect(results[0].matchSnippet).toContain("refresh token");
   });
 
+  it("tracks remote execution sessions by their local storage environment", () => {
+    const store = createInMemoryStore();
+    store.upsertEnvironment({
+      id: "ssh-dev",
+      kind: "ssh",
+      label: "dev",
+      hostAlias: "dev",
+      enabled: false,
+    });
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "cursor:workspace:remote",
+        rawId: "remote",
+        source: "cursor-agent",
+        environmentId: "ssh-dev",
+        environmentKind: "ssh",
+        environmentLabel: "dev",
+        storageEnvironmentId: "local",
+      }),
+      messages,
+    );
+
+    expect(store.getSession("cursor:workspace:remote")).toMatchObject({
+      environmentId: "ssh-dev",
+      environmentKind: "ssh",
+      environmentLabel: "dev",
+      storageEnvironmentId: "local",
+    });
+    expect(store.listIndexedSessionFiles()).toEqual([
+      expect.objectContaining({ filePath: "/tmp/rollout.jsonl", fileMtimeMs: 10, fileSize: 100 }),
+    ]);
+    expect(store.listSessionKeysByFilePath("local", new Set())).toEqual(["cursor:workspace:remote"]);
+  });
+
   it("uses the indexed title for display when first question is a long remote summary prompt", () => {
     const store = createInMemoryStore();
     const longFirstQuestion = [

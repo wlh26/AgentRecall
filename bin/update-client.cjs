@@ -442,6 +442,150 @@ function showNativeUpdateFailure(errorMessage, options = {}) {
   return false;
 }
 
+function updateProgress(version, phase, values = {}) {
+  return { phase, version, ...values };
+}
+
+async function downloadUpdatePackage(manifest, archivePath, options = {}) {
+  const response = await fetchWithTimeout(
+    options.fetchImpl || globalThis.fetch,
+    manifest.package.url,
+    { headers: { "User-Agent": "agent-recall-updater" } },
+    options.timeoutMs ?? 120_000,
+  );
+  if (!response.ok || !response.body) {
+    throw new Error(`Update package download failed (${response.status}).`);
+  }
+  const declaredLength = Number(response.headers.get("content-length"));
+  const totalBytes = Number.isFinite(declaredLength) && declaredLength > 0 ? declaredLength : undefined;
+  const reader = response.body.getReader();
+  const output = await fsp.open(archivePath, "w");
+  const hash = createHash("sha256");
+  const startedAt = (options.now || Date.now)();
+  let downloadedBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = Buffer.from(value);
+      await output.write(chunk);
+      hash.update(chunk);
+      downloadedBytes += chunk.length;
+      const elapsedMs = Math.max(1, (options.now || Date.now)() - startedAt);
+      options.onProgress?.(updateProgress(manifest.version, "downloading", {
+        downloadedBytes,
+        totalBytes,
+        percent: totalBytes ? Math.min(100, Math.round(downloadedBytes / totalBytes * 100)) : undefined,
+        bytesPerSecond: Math.round(downloadedBytes * 1000 / elapsedMs),
+      }));
+    }
+  } finally {
+    await output.close();
+  }
+  options.onProgress?.(updateProgress(manifest.version, "verifying", {
+    downloadedBytes,
+    totalBytes,
+    percent: totalBytes ? 100 : undefined,
+  }));
+  if (hash.digest("hex") !== manifest.package.sha256) {
+    throw new Error("Update package checksum mismatch.");
+  }
+  return { downloadedBytes, totalBytes };
+}
+
+async function stageUpdate(manifest, options = {}) {
+  const parsed = parseUpdateManifest(manifest);
+  const packagePath = options.packagePath || globalPackageRoot({ npmCommand: options.npmCommand });
+  const stageRoot = options.stageRoot
+    || path.join(path.dirname(packagePath), `.agent-recall-stage-${process.pid}-${randomUUID()}`);
+  const archivePath = path.join(stageRoot, parsed.package.name);
+  const stagedPackagePath = path.join(stageRoot, "node_modules", "agent-recall");
+  const backupPath = path.join(path.dirname(packagePath), `.agent-recall-backup-${process.pid}-${randomUUID()}`);
+  const statusPath = options.statusPath || installStatusPath(options.homeDir);
+  await fsp.mkdir(stageRoot, { recursive: true });
+  await writeJsonAtomic(statusPath, {
+    status: "installing",
+    version: parsed.version,
+    updatedAt: Date.now(),
+    error: null,
+  });
+  try {
+    await downloadUpdatePackage(parsed, archivePath, options);
+    options.onProgress?.(updateProgress(parsed.version, "staging", {
+      message: "正在安装到临时目录…",
+    }));
+    const npmCommand = options.npmCommand || (process.platform === "win32" ? "npm.cmd" : "npm");
+    const registry = options.registry || process.env.AGENT_RECALL_NPM_REGISTRY || DEFAULT_NPM_REGISTRY;
+    const installEnvironment = {
+      ...process.env,
+      AGENT_RECALL_STAGING_INSTALL: "1",
+      AGENT_RECALL_STAGE_ROOT: stageRoot,
+    };
+    delete installEnvironment.ELECTRON_RUN_AS_NODE;
+    try {
+      await (options.execFileImpl || execFileAsync)(npmCommand, [
+        "install",
+        "--prefix",
+        stageRoot,
+        archivePath,
+        "--registry",
+        registry,
+        "--no-audit",
+        "--no-fund",
+        "--fetch-retries",
+        "2",
+        "--fetch-timeout",
+        "30000",
+      ], {
+        shell: process.platform === "win32",
+        timeout: options.installTimeoutMs ?? 10 * 60_000,
+        maxBuffer: 16 * 1024 * 1024,
+        env: installEnvironment,
+      });
+    } catch (error) {
+      throw new Error(`npm 安装失败：${formatUpdateError(error)}`);
+    }
+    options.onProgress?.(updateProgress(parsed.version, "validating", {
+      message: "正在检查应用和 Electron 运行时…",
+    }));
+    const stagedPackage = JSON.parse(await fsp.readFile(path.join(stagedPackagePath, "package.json"), "utf8"));
+    if (stagedPackage.name !== "agent-recall" || stagedPackage.version !== parsed.version) {
+      throw new Error("Staged update package metadata does not match the release.");
+    }
+    await Promise.all([
+      fsp.access(path.join(stagedPackagePath, "bin", "agent-recall.cjs")),
+      fsp.access(path.join(stagedPackagePath, "dist", "main", "index.js")),
+    ]);
+    await (options.ensureElectronImpl || ensureInstalledElectron)({
+      npmCommand,
+      nodePath: options.nodePath,
+      packagePath: stagedPackagePath,
+      env: installEnvironment,
+      timeoutMs: options.electronInstallTimeoutMs,
+    });
+    return {
+      version: parsed.version,
+      stageRoot,
+      archivePath,
+      stagedPackagePath,
+      livePackagePath: packagePath,
+      backupPath,
+      statusPath,
+    };
+  } catch (error) {
+    await writeJsonAtomic(statusPath, {
+      status: "error",
+      version: parsed.version,
+      updatedAt: Date.now(),
+      error: error instanceof Error ? error.message : String(error),
+    }).catch(() => undefined);
+    if (!options.keepStageOnError) {
+      await fsp.rm(stageRoot, { recursive: true, force: true }).catch(() => undefined);
+    }
+    throw error;
+  }
+}
+
 async function installUpdate(manifest, options = {}) {
   const parsed = parseUpdateManifest(manifest);
   const fetchImpl = options.fetchImpl || globalThis.fetch;
@@ -459,12 +603,12 @@ async function installUpdate(manifest, options = {}) {
     error: null,
   });
   try {
-    const response = await fetchWithTimeout(fetchImpl, parsed.package.url, { headers: { "User-Agent": "agent-recall-updater" } }, options.timeoutMs ?? 120_000);
-    if (!response.ok) throw new Error(`Update package download failed (${response.status}).`);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    const checksum = createHash("sha256").update(bytes).digest("hex");
-    if (checksum !== parsed.package.sha256) throw new Error("Update package checksum mismatch.");
-    await fsp.writeFile(archivePath, bytes);
+    await downloadUpdatePackage(parsed, archivePath, {
+      fetchImpl,
+      timeoutMs: options.timeoutMs,
+      onProgress: options.onProgress,
+      now: options.now,
+    });
     if (fs.existsSync(packagePath)) {
       await fsp.cp(packagePath, packageBackupPath, { recursive: true, force: true });
       packageBackedUp = true;
@@ -924,6 +1068,7 @@ module.exports = {
   globalCommandPath,
   installStatusPath,
   installUpdate,
+  downloadUpdatePackage,
   isElectronRuntimeReady,
   launchInstalledApp,
   manualInstallCommand,
@@ -933,6 +1078,7 @@ module.exports = {
   skipUpdateVersion,
   snoozeUpdatePrompt,
   showNativeUpdateFailure,
+  stageUpdate,
   stateDirectory,
   stopRunningApp,
   updateLockPath,

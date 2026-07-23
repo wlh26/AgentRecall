@@ -42,7 +42,7 @@ import {
 } from "lucide-react";
 import type { ApiConfig, ClaudeApiConfig } from "../../core/api-config";
 import type { IndexStatus } from "../../core/indexer";
-import type { AppUpdateStatus } from "../../core/app-update-types";
+import type { AppUpdateProgress, AppUpdateStatus } from "../../core/app-update-types";
 import { formatRelativeTime } from "../../core/format-session";
 import { LIVE_SESSION_REFRESH_INTERVAL_MS, QUOTA_REFRESH_INTERVAL_MS } from "../../core/refresh-policy";
 import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
@@ -365,6 +365,7 @@ export function App(): ReactElement {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection>("terminal");
   const [appUpdateStatus, setAppUpdateStatus] = useState<AppUpdateStatus | null>(null);
+  const [appUpdateProgress, setAppUpdateProgress] = useState<AppUpdateProgress | null>(null);
   const [appUpdateBusy, setAppUpdateBusy] = useState(false);
   const [appUpdateError, setAppUpdateError] = useState<string | null>(null);
   const shouldSignalAppUpdate = Boolean(appUpdateStatus?.updateAvailable && !appUpdateStatus.updateSkipped && !appUpdateStatus.promptSnoozed);
@@ -515,7 +516,7 @@ export function App(): ReactElement {
     if (!background) setQuotaLoading(true);
     if (mode === "manual") setQuotaFeedback({ kind: "running", message: t("Refreshing usage limits...", "正在刷新额度...") });
     try {
-      const nextQuotas = await window.sessionSearch.getQuotas();
+      const nextQuotas = await window.sessionSearch.getQuotas(mode === "manual");
       setQuotas(nextQuotas);
       if (mode === "manual") {
         const successMessage = t("Usage limits refreshed.", "额度已刷新。");
@@ -807,7 +808,11 @@ export function App(): ReactElement {
   useEffect(() => {
     void loadQuotas();
     const timer = window.setInterval(() => void loadQuotas("background"), QUOTA_REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(timer);
+    const unsubscribe = window.sessionSearch.onQuotaUpdated((snapshot) => setQuotas(snapshot));
+    return () => {
+      window.clearInterval(timer);
+      unsubscribe();
+    };
   }, [loadQuotas]);
 
   useEffect(() => {
@@ -1028,6 +1033,8 @@ export function App(): ReactElement {
       setSettingsOpen(true);
     });
     const offAppUpdate = window.sessionSearch.onAppUpdateStatus(setAppUpdateStatus);
+    const offAppUpdateProgress = window.sessionSearch.onAppUpdateProgress(setAppUpdateProgress);
+    const offOpenSession = window.sessionSearch.onOpenSession((sessionKey) => setSelectedKey(sessionKey));
     const offEnvironments = window.sessionSearch.onEnvironmentsUpdated((nextEnvironments) => {
       setEnvironments(nextEnvironments);
       setEnvironmentId((current) =>
@@ -1047,6 +1054,8 @@ export function App(): ReactElement {
       offFocus();
       offOpenSettings();
       offAppUpdate();
+      offAppUpdateProgress();
+      offOpenSession();
       offEnvironments();
     };
   }, [load, loadSidebarMetadata, loadStats]);
@@ -1610,6 +1619,7 @@ export function App(): ReactElement {
   async function installAppUpdate(): Promise<void> {
     setAppUpdateBusy(true);
     setAppUpdateError(null);
+    setAppUpdateProgress(null);
     try {
       await window.sessionSearch.installAppUpdate();
     } catch (error) {
@@ -2557,6 +2567,7 @@ export function App(): ReactElement {
           initialSection={settingsInitialSection}
           settings={appSettings}
           appUpdateStatus={appUpdateStatus}
+          appUpdateProgress={appUpdateProgress}
           appUpdateBusy={appUpdateBusy}
           appUpdateError={appUpdateError}
           environments={environments}
@@ -2818,6 +2829,19 @@ function QuotaPanel({
               </div>
             ) : null}
           </div>
+          {snapshot.freshness === "stale" ? (
+            <div className="quota-stale-notice">
+              {l(
+                `Showing data from ${formatRelativeTime(Date.parse(snapshot.lastSuccessfulAt ?? ""))}. Refresh failed.`,
+                `正在显示 ${formatRelativeTime(Date.parse(snapshot.lastSuccessfulAt ?? ""))} 的数据，刷新失败。`,
+              )}
+            </div>
+          ) : null}
+          {snapshot.freshness === "auth-required" ? (
+            <div className="quota-stale-notice error">
+              {l("Codex login expired. Sign in again to refresh usage limits.", "Codex 登录已失效，请重新登录后刷新额度。")}
+            </div>
+          ) : null}
           {feedback ? <div className={`quota-feedback ${feedback.kind}`}>{feedback.message}</div> : null}
         </>
       ) : null}

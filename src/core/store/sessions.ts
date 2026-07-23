@@ -1,5 +1,9 @@
 import * as fs from "node:fs";
 import type { SQLInputValue } from "node:sqlite";
+import {
+  materializeSessionAttachment,
+  MAX_SESSION_ATTACHMENT_BYTES,
+} from "../session-attachments";
 import { truncateTraceDetail } from "../trace-detail";
 import type {
   IndexedSession,
@@ -64,6 +68,7 @@ interface SessionRow {
   raw_id: string;
   source: SessionSource;
   environment_id: string;
+  storage_environment_id: string;
   project_path: string;
   file_path: string;
   original_title: string;
@@ -138,6 +143,7 @@ export class SessionsStore {
   constructor(
     private readonly db: SessionStoreDatabase,
     private readonly environments: EnvironmentStore,
+    private readonly attachmentCacheRoot: string | null = null,
   ) {}
 
   private transaction(run: () => void): void {
@@ -160,21 +166,24 @@ export class SessionsStore {
     const normalizedTokenEvents = tokenEvents.map(normalizeTokenEvent).filter((event) => event.totalTokens > 0 && event.dedupeKey);
     const tokenUsage = normalizedTokenEvents.length > 0 ? tokenUsageFromEvents(normalizedTokenEvents) : normalizeTokenUsage(session.tokenUsage);
     const indexedAt = Date.now();
+    const environmentId = session.environmentId ?? "local";
+    const storageEnvironmentId = session.storageEnvironmentId ?? environmentId;
     this.transaction(() => {
       this.db
         .prepare(
           `
           INSERT INTO sessions (
-            session_key, raw_id, source, environment_id, project_path, file_path, original_title, first_question,
+            session_key, raw_id, source, environment_id, storage_environment_id, project_path, file_path, original_title, first_question,
             timestamp, file_mtime_ms, file_size, pr_url, pr_number, message_count,
             input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens, total_tokens, indexed_at,
             is_subagent, parent_session_id
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(session_key) DO UPDATE SET
             raw_id = excluded.raw_id,
             source = excluded.source,
             environment_id = excluded.environment_id,
+            storage_environment_id = excluded.storage_environment_id,
             project_path = excluded.project_path,
             file_path = excluded.file_path,
             original_title = excluded.original_title,
@@ -199,7 +208,8 @@ export class SessionsStore {
           session.sessionKey,
           session.rawId,
           session.source,
-          session.environmentId ?? "local",
+          environmentId,
+          storageEnvironmentId,
           session.projectPath,
           session.filePath,
           session.originalTitle,
@@ -221,6 +231,7 @@ export class SessionsStore {
         );
 
       this.db.prepare("DELETE FROM messages WHERE session_key = ?").run(session.sessionKey);
+      this.db.prepare("DELETE FROM message_attachments WHERE session_key = ?").run(session.sessionKey);
       this.db.prepare("DELETE FROM message_events WHERE session_key = ?").run(session.sessionKey);
       this.db.prepare("DELETE FROM token_events WHERE session_key = ?").run(session.sessionKey);
       this.db.prepare("DELETE FROM trace_events WHERE session_key = ?").run(session.sessionKey);
@@ -231,6 +242,40 @@ export class SessionsStore {
       );
       for (const message of messages) {
         insertMessage.run(session.sessionKey, message.index, message.role, message.content, message.timestamp);
+      }
+
+      const insertAttachment = this.db.prepare(
+        `INSERT INTO message_attachments (
+          session_key, message_index, attachment_id, attachment_index, file_name,
+          mime_type, size_bytes, preview_kind, status, cache_path
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      let sessionAttachmentBytes = 0;
+      for (const message of messages) {
+        for (const [attachmentIndex, attachment] of (message.attachments ?? []).entries()) {
+          const attachmentId = `${message.index}-${attachmentIndex}-${attachment.id}`;
+          const materialized = materializeSessionAttachment(attachment, {
+            cacheRoot: this.attachmentCacheRoot,
+            sessionFilePath: session.filePath,
+            attachmentId,
+            remainingSessionBytes: MAX_SESSION_ATTACHMENT_BYTES - sessionAttachmentBytes,
+          });
+          if (materialized.status === "available") {
+            sessionAttachmentBytes += materialized.sizeBytes ?? 0;
+          }
+          insertAttachment.run(
+            session.sessionKey,
+            message.index,
+            materialized.id,
+            attachmentIndex,
+            materialized.fileName,
+            materialized.mimeType,
+            materialized.sizeBytes ?? null,
+            materialized.previewKind,
+            materialized.status,
+            materialized.cachePath,
+          );
+        }
       }
 
       const insertMessageEvent = this.db.prepare(
@@ -302,7 +347,7 @@ export class SessionsStore {
     const row = this.db
       .prepare(
         `
-        SELECT raw_id, source, environment_id, project_path, file_path, original_title, first_question,
+        SELECT raw_id, source, environment_id, storage_environment_id, project_path, file_path, original_title, first_question,
           timestamp, file_mtime_ms, file_size, pr_url, pr_number, is_subagent, parent_session_id
         FROM sessions
         WHERE session_key = ?
@@ -314,6 +359,7 @@ export class SessionsStore {
         | "raw_id"
         | "source"
         | "environment_id"
+        | "storage_environment_id"
         | "project_path"
         | "file_path"
         | "original_title"
@@ -332,6 +378,7 @@ export class SessionsStore {
       row.raw_id === session.rawId &&
       row.source === session.source &&
       row.environment_id === (session.environmentId ?? "local") &&
+      row.storage_environment_id === (session.storageEnvironmentId ?? session.environmentId ?? "local") &&
       row.project_path === session.projectPath &&
       row.file_path === session.filePath &&
       row.original_title === session.originalTitle &&
@@ -356,7 +403,7 @@ export class SessionsStore {
         `
         SELECT file_path AS filePath, file_mtime_ms AS fileMtimeMs, file_size AS fileSize, indexed_at AS indexedAt
         FROM sessions
-        WHERE environment_id = ?
+        WHERE storage_environment_id = ?
           AND file_path != ''
           AND file_mtime_ms > 0
       `,
@@ -373,20 +420,23 @@ export class SessionsStore {
     const normalizedTokenEvents = tokenEvents?.map(normalizeTokenEvent).filter((event) => event.totalTokens > 0 && event.dedupeKey);
     const tokenUsage = normalizedTokenEvents === undefined ? normalizeTokenUsage(session.tokenUsage) : tokenUsageFromEvents(normalizedTokenEvents);
     const indexedAt = Date.now();
+    const environmentId = session.environmentId ?? "local";
+    const storageEnvironmentId = session.storageEnvironmentId ?? environmentId;
     this.transaction(() => {
       this.db
         .prepare(
           `
           INSERT INTO sessions (
-            session_key, raw_id, source, environment_id, project_path, file_path, original_title, first_question,
+            session_key, raw_id, source, environment_id, storage_environment_id, project_path, file_path, original_title, first_question,
             timestamp, file_mtime_ms, file_size, pr_url, pr_number, message_count,
             input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens, total_tokens, indexed_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(session_key) DO UPDATE SET
             raw_id = excluded.raw_id,
             source = excluded.source,
             environment_id = excluded.environment_id,
+            storage_environment_id = excluded.storage_environment_id,
             project_path = excluded.project_path,
             file_path = excluded.file_path,
             original_title = excluded.original_title,
@@ -409,7 +459,8 @@ export class SessionsStore {
           session.sessionKey,
           session.rawId,
           session.source,
-          session.environmentId ?? "local",
+          environmentId,
+          storageEnvironmentId,
           session.projectPath,
           session.filePath,
           session.originalTitle,
@@ -676,7 +727,7 @@ export class SessionsStore {
 
   listSessionKeysByFilePath(environmentId: string, filePaths: ReadonlySet<string>): string[] {
     const rows = this.db
-      .prepare("SELECT session_key, file_path FROM sessions WHERE environment_id = ? AND file_path != ''")
+      .prepare("SELECT session_key, file_path FROM sessions WHERE storage_environment_id = ? AND file_path != ''")
       .all(environmentId) as Array<{ session_key: string; file_path: string }>;
     return rows.filter((row) => !filePaths.has(row.file_path)).map((row) => row.session_key);
   }
@@ -944,7 +995,7 @@ export class SessionsStore {
   }
 
   getMessages(sessionKey: string, offset = 0, limit = 120): SessionMessage[] {
-    return (
+    const messages: SessionMessage[] = (
       this.db
         .prepare(
           `
@@ -962,6 +1013,59 @@ export class SessionsStore {
         timestamp: string;
       }>
     ).map((row) => ({ index: row.message_index, role: row.role, content: row.content, timestamp: row.timestamp }));
+    if (messages.length === 0) return messages;
+    const messageIndexes = new Set(messages.map((message) => message.index));
+    const attachments = this.db.prepare(
+      `SELECT message_index, attachment_id, file_name, mime_type, size_bytes, preview_kind, status
+       FROM message_attachments
+       WHERE session_key = ?
+       ORDER BY message_index, attachment_index`,
+    ).all(sessionKey) as Array<{
+      message_index: number;
+      attachment_id: string;
+      file_name: string;
+      mime_type: string;
+      size_bytes: number | null;
+      preview_kind: "image" | "pdf" | "text" | "file";
+      status: "available" | "unsafe" | "missing" | "too_large";
+    }>;
+    for (const message of messages) {
+      const matching = attachments
+        .filter((attachment) => attachment.message_index === message.index && messageIndexes.has(attachment.message_index))
+        .map((attachment) => ({
+          id: attachment.attachment_id,
+          fileName: attachment.file_name,
+          mimeType: attachment.mime_type,
+          sizeBytes: attachment.size_bytes ?? undefined,
+          previewKind: attachment.preview_kind,
+          status: attachment.status,
+        }));
+      if (matching.length > 0) message.attachments = matching;
+    }
+    return messages;
+  }
+
+  getAttachmentFile(
+    sessionKey: string,
+    attachmentId: string,
+  ): { cachePath: string; fileName: string; mimeType: string; previewKind: "image" | "pdf" | "text" | "file" } | null {
+    const row = this.db.prepare(
+      `SELECT cache_path, file_name, mime_type, preview_kind
+       FROM message_attachments
+       WHERE session_key = ? AND attachment_id = ? AND status = 'available'`,
+    ).get(sessionKey, attachmentId) as {
+      cache_path: string | null;
+      file_name: string;
+      mime_type: string;
+      preview_kind: "image" | "pdf" | "text" | "file";
+    } | undefined;
+    if (!row?.cache_path) return null;
+    return {
+      cachePath: row.cache_path,
+      fileName: row.file_name,
+      mimeType: row.mime_type,
+      previewKind: row.preview_kind,
+    };
   }
 
   getAllMessages(sessionKey: string): SessionMessage[] {
@@ -1755,6 +1859,7 @@ export class SessionsStore {
       rawId: row.raw_id,
       source: row.source,
       environmentId: environment.id,
+      storageEnvironmentId: row.storage_environment_id,
       environmentKind: environment.kind,
       environmentLabel: environment.label,
       projectPath: row.project_path,

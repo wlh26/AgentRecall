@@ -19,6 +19,7 @@ describe("session store schema", () => {
       expect(tables).toEqual(expect.arrayContaining([
         "sessions",
         "messages",
+        "message_attachments",
         "trace_events",
         "environments",
         "skill_usage_events",
@@ -161,6 +162,68 @@ describe("session store schema", () => {
       db.prepare("UPDATE sessions SET file_mtime_ms = 789 WHERE session_key = 'cursor:legacy'").run();
       migrateSessionStore(db);
       expect(db.prepare("SELECT file_mtime_ms FROM sessions WHERE session_key = 'cursor:legacy'").get()).toEqual({ file_mtime_ms: 789 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("backfills the storage environment from the execution environment exactly once", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      migrateSessionStore(db);
+      db.prepare("DELETE FROM data_migrations WHERE id = 'session-storage-environment-v1'").run();
+      db.prepare(`
+        INSERT INTO sessions (
+          session_key, raw_id, source, environment_id, project_path, file_path,
+          original_title, first_question, timestamp, file_mtime_ms, file_size
+        ) VALUES ('ssh:dev:codex:remote', 'remote', 'codex-cli', 'ssh-dev', '/repo', '/tmp/remote.jsonl',
+          'Remote title', 'Remote question', 1, 123, 10)
+      `).run();
+
+      migrateSessionStore(db);
+
+      expect(db.prepare("SELECT storage_environment_id FROM sessions WHERE session_key = 'ssh:dev:codex:remote'").get()).toEqual({
+        storage_environment_id: "ssh-dev",
+      });
+
+      db.prepare("UPDATE sessions SET storage_environment_id = 'local' WHERE session_key = 'ssh:dev:codex:remote'").run();
+      migrateSessionStore(db);
+      expect(db.prepare("SELECT storage_environment_id FROM sessions WHERE session_key = 'ssh:dev:codex:remote'").get()).toEqual({
+        storage_environment_id: "local",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("removes empty Cursor composer indexes and invalidates remaining Cursor sessions exactly once", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      migrateSessionStore(db);
+      db.prepare("DELETE FROM data_migrations WHERE id = 'cursor-runtime-environment-v1'").run();
+      const insert = db.prepare(`
+        INSERT INTO sessions (
+          session_key, raw_id, source, project_path, file_path,
+          original_title, first_question, timestamp, file_mtime_ms, file_size
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, 10)
+      `);
+      insert.run("cursor:empty", "empty-uuid", "cursor-agent", "", "/tmp/state.vscdb", "empty-uuid", "", 123);
+      insert.run("cursor:valid", "valid", "cursor-agent", "/repo", "/tmp/state.vscdb", "Named Cursor session", "", 456);
+      insert.run("claude:unchanged", "unchanged", "claude-cli", "/repo", "/tmp/claude.jsonl", "Claude", "Question", 789);
+      db.prepare(
+        "INSERT INTO session_fts (session_key, title, first_question, content_text, project_path) VALUES ('cursor:empty', 'empty-uuid', '', '', '')",
+      ).run();
+
+      migrateSessionStore(db);
+
+      expect(db.prepare("SELECT 1 FROM sessions WHERE session_key = 'cursor:empty'").get()).toBeUndefined();
+      expect(db.prepare("SELECT 1 FROM session_fts WHERE session_key = 'cursor:empty'").get()).toBeUndefined();
+      expect(db.prepare("SELECT file_mtime_ms FROM sessions WHERE session_key = 'cursor:valid'").get()).toEqual({ file_mtime_ms: 0 });
+      expect(db.prepare("SELECT file_mtime_ms FROM sessions WHERE session_key = 'claude:unchanged'").get()).toEqual({ file_mtime_ms: 789 });
+
+      db.prepare("UPDATE sessions SET file_mtime_ms = 999 WHERE session_key = 'cursor:valid'").run();
+      migrateSessionStore(db);
+      expect(db.prepare("SELECT file_mtime_ms FROM sessions WHERE session_key = 'cursor:valid'").get()).toEqual({ file_mtime_ms: 999 });
     } finally {
       db.close();
     }
