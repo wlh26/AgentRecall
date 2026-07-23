@@ -325,6 +325,8 @@ export interface SessionStats {
 
 export type UsageQuotaProvider = "codex" | "claude-code";
 export type UsageQuotaStatus = "supported" | "unsupported_api_key" | "not_configured" | "error";
+export type UsageQuotaFreshness = "fresh" | "stale" | "auth-required" | "unavailable";
+export type UsageQuotaFailureKind = "transient" | "auth" | "rate_limit" | "permanent";
 
 export interface UsageQuota {
   key: string;
@@ -345,12 +347,16 @@ export interface UsageQuotaCard {
   plan?: string;
   quotas: UsageQuota[];
   detail?: string;
+  errorKind?: UsageQuotaFailureKind;
 }
 
 export interface UsageQuotaSnapshot {
   generatedAt: string;
   providers: UsageQuotaCard[];
   hiddenProviders?: UsageQuotaProvider[];
+  freshness?: UsageQuotaFreshness;
+  lastSuccessfulAt?: string;
+  error?: string;
 }
 
 export type LiveSessionFamily = "claude" | "codex" | "tclaude" | "tcodex" | "codebuddy" | "codewiz" | "trae" | "qoder";
