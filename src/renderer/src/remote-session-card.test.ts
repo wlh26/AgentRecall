@@ -28,7 +28,6 @@ const local: SessionSearchResult = {
   customTitle: null,
   displayTitle: "Sync UX",
   favorited: false,
-  pinned: false,
   hidden: false,
   tags: [],
   matchSnippet: null,

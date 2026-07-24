@@ -17,7 +17,8 @@ describe("SessionStore search performance", () => {
 
     expect(candidatesBlock).toContain("query: string");
     expect(candidatesBlock).toContain("LIMIT ?");
-    expect(candidatesBlock).toContain("ORDER BY pinned DESC");
+    expect(candidatesBlock).not.toContain("ORDER BY pinned DESC");
+    expect(storeSource).not.toContain("result.pinned");
   });
 
   it("keeps FTS candidate lookup key-only instead of generating snippets for every match", () => {
