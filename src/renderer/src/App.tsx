@@ -2163,7 +2163,7 @@ export function App(): ReactElement {
             </button>
             <button
               className={`icon-button toolbar-icon-button ${groupMode !== "flat" ? "active" : ""}`}
-              onClick={() => setGroupMode((current) => (current === "flat" ? "project" : current === "project" ? "source" : current === "source" ? "time" : "flat"))}
+              onClick={() => setGroupMode((current) => (current === "flat" ? "project" : "flat"))}
               title={t("Group results", "分组展示")}
               aria-label={t("Group results", "分组展示")}
             >
