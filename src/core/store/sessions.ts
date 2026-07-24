@@ -1584,7 +1584,7 @@ export class SessionsStore {
           SELECT sessions.*, ${sessionActivitySql("sessions")} AS last_activity_at
           FROM sessions
           WHERE ${where.join(" AND ")}
-          ORDER BY ${sessionSortSql(options.sortBy)} DESC
+          ORDER BY favorited DESC, ${sessionSortSql(options.sortBy)} DESC
           LIMIT ?
         `,
         )
@@ -1891,7 +1891,7 @@ export class SessionsStore {
   }
 
   private score(result: SessionSearchResult, query: string): number {
-    if (!query) return 0;
+    if (!query) return result.favorited ? 1_000_000_000_000 : 0;
     const q = query.toLowerCase();
     const title = result.displayTitle.toLowerCase();
     let score = 0;
@@ -1901,6 +1901,7 @@ export class SessionsStore {
     if (result.firstQuestion.toLowerCase().includes(q)) score += 300;
     if (result.matchSnippet) score += 120;
     if (result.projectPath.toLowerCase().includes(q) || result.rawId.toLowerCase().includes(q)) score += 50;
+    if (result.favorited) score += 25;
     return score;
   }
 
@@ -1917,7 +1918,8 @@ export class SessionsStore {
     const activityMs = result.lastActivityAt || result.fileMtimeMs || result.timestamp || 0;
     const ageDays = Math.max(0, (Date.now() - activityMs) / (24 * 60 * 60 * 1000));
     const decay = Math.pow(0.5, ageDays / 30);
-    return relevance * (0.08 + 0.92 * decay);
+    const favoriteBoost = result.favorited ? 1.2 : 1.0;
+    return relevance * (0.08 + 0.92 * decay) * favoriteBoost;
   }
 
   private sortValue(result: SessionSearchResult, sortBy: SessionSortBy = "activity"): number {

@@ -336,6 +336,113 @@ describe("SessionStore", () => {
     }
   });
 
+  it("prioritizes favorite sessions when browsing without a query", () => {
+    const store = createInMemoryStore();
+    try {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: "codex:older-favorite",
+          rawId: "older-favorite",
+          timestamp: 100,
+          fileMtimeMs: 100,
+        }),
+        [],
+      );
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: "codex:newer-plain",
+          rawId: "newer-plain",
+          timestamp: 200,
+          fileMtimeMs: 200,
+        }),
+        [],
+      );
+      store.setFavorited("codex:older-favorite", true);
+
+      expect(store.searchSessions({ query: "" }).map((session) => session.sessionKey)).toEqual([
+        "codex:older-favorite",
+        "codex:newer-plain",
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("prioritizes favorite sessions in relevance sorting", () => {
+    const store = createInMemoryStore();
+    try {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: "codex:older-match",
+          rawId: "older-match",
+          originalTitle: "deploy",
+          firstQuestion: "deploy",
+          timestamp: 100,
+          fileMtimeMs: 100,
+        }),
+        [],
+      );
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: "codex:newer-match",
+          rawId: "newer-match",
+          originalTitle: "deploy",
+          firstQuestion: "deploy",
+          timestamp: 200,
+          fileMtimeMs: 200,
+        }),
+        [],
+      );
+      store.setFavorited("codex:older-match", true);
+
+      expect(
+        store.searchSessions({ query: "deploy", sortBy: "activity" }).map((session) => session.sessionKey),
+      ).toEqual(["codex:older-match", "codex:newer-match"]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("applies the favorite boost in smart sorting", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-24T00:00:00Z"));
+    const store = createInMemoryStore();
+    try {
+      const now = Date.now();
+      const fiveDays = 5 * 24 * 60 * 60 * 1000;
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: "codex:favorite-smart",
+          rawId: "favorite-smart",
+          originalTitle: "deploy",
+          firstQuestion: "deploy",
+          timestamp: now - fiveDays,
+          fileMtimeMs: now - fiveDays,
+        }),
+        [],
+      );
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: "codex:recent-smart",
+          rawId: "recent-smart",
+          originalTitle: "deploy",
+          firstQuestion: "deploy",
+          timestamp: now,
+          fileMtimeMs: now,
+        }),
+        [],
+      );
+      store.setFavorited("codex:favorite-smart", true);
+
+      expect(
+        store.searchSessions({ query: "deploy", sortBy: "smart" }).map((session) => session.sessionKey),
+      ).toEqual(["codex:favorite-smart", "codex:recent-smart"]);
+    } finally {
+      store.close();
+      vi.useRealTimers();
+    }
+  });
+
   it("returns structured message hits and metadata-only match reasons", () => {
     const store = createInMemoryStore();
     store.upsertIndexedSession(
