@@ -18,10 +18,18 @@ import {
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const sessionRowSource = readFileSync(new URL("./features/search/session-row.tsx", import.meta.url), "utf8");
+const queryBuilderSource = readFileSync(new URL("./features/search/query-builder.tsx", import.meta.url), "utf8");
 const detailPanelSource = readFileSync(new URL("./features/session-detail/detail-panel.tsx", import.meta.url), "utf8");
 const wslEnvironmentDialogSource = readFileSync(new URL("./features/settings/wsl-environment-dialog.tsx", import.meta.url), "utf8");
 
 describe("session source labels", () => {
+  it("does not expose session pin controls", () => {
+    expect(appSource).not.toContain('setVisibility("pinned")');
+    expect(appSource).not.toContain("setPinned(");
+    expect(sessionRowSource).not.toContain("session.pinned");
+    expect(queryBuilderSource).not.toContain('value: "pinned"');
+  });
+
   it("keeps the WSL distribution label unprefixed before adding its badge prefix", () => {
     expect(environmentBadgeLabel({ environmentKind: "wsl", environmentLabel: "Ubuntu" }, "en")).toBe("WSL · Ubuntu");
     expect(wslEnvironmentDialogSource).toContain("label: distribution,");
