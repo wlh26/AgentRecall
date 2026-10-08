@@ -152,6 +152,10 @@ export function isExecutableAttachmentPath(filePath: string): boolean {
   return EXECUTABLE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
 }
 
+export function shouldRevealExecutableAttachment(fileName: string, cachePath: string): boolean {
+  return isExecutableAttachmentPath(fileName) || isExecutableAttachmentPath(cachePath);
+}
+
 function safeExtension(fileName: string): string {
   const extension = path.extname(fileName).toLowerCase();
   if (EXECUTABLE_EXTENSIONS.has(extension)) return "";

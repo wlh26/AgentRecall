@@ -2,7 +2,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { isExecutableAttachmentPath, materializeSessionAttachment } from "./session-attachments";
+import {
+  isExecutableAttachmentPath,
+  materializeSessionAttachment,
+  shouldRevealExecutableAttachment,
+} from "./session-attachments";
 
 describe("session attachments", () => {
   it("materializes bounded inline image data into the managed cache", () => {
@@ -118,6 +122,7 @@ describe("session attachments", () => {
       expect(result.status).toBe("available");
       expect(path.extname(result.cachePath!)).toBe("");
       expect(isExecutableAttachmentPath(result.cachePath!)).toBe(false);
+      expect(shouldRevealExecutableAttachment(result.fileName, result.cachePath!)).toBe(true);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -130,5 +135,7 @@ describe("session attachments", () => {
     for (const name of ["a.png", "a.pdf", "a.txt", "a.docx", "a"]) {
       expect(isExecutableAttachmentPath(name)).toBe(false);
     }
+    expect(shouldRevealExecutableAttachment("run.txt", "/cache/legacy.BAT")).toBe(true);
+    expect(shouldRevealExecutableAttachment("run.BAT", "/cache/hash")).toBe(true);
   });
 });

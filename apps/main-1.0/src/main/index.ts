@@ -137,7 +137,7 @@ import {
   isSharedSessionSourceDatabase,
   remoteSessionKey,
 } from "../core/session-environment";
-import { isExecutableAttachmentPath } from "../core/session-attachments";
+import { shouldRevealExecutableAttachment } from "../core/session-attachments";
 import {
   OPTIONAL_SESSION_SOURCE_DESCRIPTORS,
   sessionSourceDescriptor,
@@ -314,13 +314,13 @@ const sshCommandService = new SshCommandService({
   getPassword: (environmentId) => sshCredentialService.getPassword(environmentId),
 });
 
-async function openAttachmentFile(cachePath: string): Promise<void> {
+async function openAttachmentFile(attachment: { fileName: string; cachePath: string }): Promise<void> {
   // Attachment names come from session content; reveal executable types instead of running them.
-  if (isExecutableAttachmentPath(cachePath)) {
-    shell.showItemInFolder(cachePath);
+  if (shouldRevealExecutableAttachment(attachment.fileName, attachment.cachePath)) {
+    shell.showItemInFolder(attachment.cachePath);
     return;
   }
-  const error = await shell.openPath(cachePath);
+  const error = await shell.openPath(attachment.cachePath);
   if (error) throw new Error(error);
 }
 
@@ -2050,13 +2050,13 @@ function registerIpc(): void {
       const text = await fs.readFile(attachment.cachePath, "utf8");
       return { kind: "text", data: text.slice(0, 256 * 1024) };
     }
-    await openAttachmentFile(attachment.cachePath);
+    await openAttachmentFile(attachment);
     return { kind: "external" };
   });
   ipcMain.handle("attachment:open", async (_event, sessionKey: string, attachmentId: string) => {
     const attachment = store.getAttachmentFile(sessionKey, attachmentId);
     if (!attachment) throw new Error("Attachment is unavailable.");
-    await openAttachmentFile(attachment.cachePath);
+    await openAttachmentFile(attachment);
   });
   ipcMain.handle("session:trace-events", async (_event, sessionKey: string, options?: TraceEventQueryOptions) => {
     const session = store.getSession(sessionKey);
